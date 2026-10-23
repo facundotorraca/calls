@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "calls"
+version = "0.1.0"
+description = "Local transcription of screen and call recordings with Whisper."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Facundo Torraca", email = "facundotorracadev@gmail.com" }]
+dependencies = [
+    "faster-whisper>=1.1",
+    # Imported directly to pick a specific audio track; faster-whisper only reads the first.
+    "av>=12",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+ui = ["gradio>=5"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+calls = "calls.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/calls"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

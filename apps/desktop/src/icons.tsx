@@ -1,4 +1,4 @@
-// Small stroke icons, drawn with currentColor so they follow the text color.
+// Small stroke icons, drawn with currentColor so they follow the text color. Corners are 90°.
 import type { ReactNode } from "react";
 
 function Icon({ children, className }: { children: ReactNode; className?: string }) {
@@ -26,19 +26,6 @@ export const ChevronIcon = (p: Props) => (
   </Icon>
 );
 
-export const SparklesIcon = (p: Props) => (
-  <Icon {...p}>
-    <path d="M7 2.5l1.2 3.3 3.3 1.2-3.3 1.2L7 11.5 5.8 8.2 2.5 7l3.3-1.2z" />
-    <path d="M12.5 10.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" />
-  </Icon>
-);
-
-export const TextIcon = (p: Props) => (
-  <Icon {...p}>
-    <path d="M2.5 4h11M2.5 8h11M2.5 12h7" />
-  </Icon>
-);
-
 export const FolderIcon = (p: Props) => (
   <Icon {...p}>
     <path d="M2 4.5c0-.6.4-1 1-1h3l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" />
@@ -54,7 +41,7 @@ export const TrayIcon = (p: Props) => (
 
 export const InboxIcon = (p: Props) => (
   <Icon {...p}>
-    <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+    <rect x="2.5" y="3" width="11" height="10" />
     <path d="M2.5 9.5h3l1 1.5h3l1-1.5h3" />
   </Icon>
 );
@@ -80,7 +67,7 @@ export const SortIcon = (p: Props) => (
 
 export const CopyIcon = (p: Props) => (
   <Icon {...p}>
-    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <rect x="5.5" y="5.5" width="8" height="8" />
     <path d="M10.5 5.5V3.5c0-.6-.4-1-1-1h-6c-.6 0-1 .4-1 1v6c0 .6.4 1 1 1h2" />
   </Icon>
 );
@@ -107,7 +94,7 @@ export const PersonIcon = (p: Props) => (
 
 export const CalendarIcon = (p: Props) => (
   <Icon {...p}>
-    <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+    <rect x="2.5" y="3.5" width="11" height="10" />
     <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
   </Icon>
 );

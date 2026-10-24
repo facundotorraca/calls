@@ -1,6 +1,6 @@
 import type { PointerEvent } from "react";
-import type { Call, CallId } from "./api";
-import { FolderIcon } from "./icons";
+import type { Call, CallId, Folder } from "./api";
+import { folderColor, FolderMark } from "./Folders";
 import { formatDate, formatDuration, stepLabel } from "./format";
 
 export type ProgressMap = Record<CallId, { step: string; fraction: number }>;
@@ -33,6 +33,7 @@ interface Props {
   sort: Sort;
   selected: CallId | null;
   progress: ProgressMap;
+  folders: Folder[];
   /** Show each call's folder (when listing several folders at once). */
   showFolder: boolean;
   /** The call being dragged, dimmed in the list. */
@@ -72,6 +73,7 @@ function CallItem({
   call,
   selected,
   progress,
+  folders,
   showFolder,
   dragging,
   onSelect,
@@ -97,7 +99,7 @@ function CallItem({
         </span>
         {showFolder && call.folder && (
           <span className="call-folder">
-            <FolderIcon />
+            <FolderMark color={folderColor(folders, call.folder)} />
             {call.folder}
           </span>
         )}
@@ -112,11 +114,16 @@ function CallStatus({ call, progress }: { call: Call; progress?: ProgressMap[Cal
     case "ready":
       return null;
     case "failed":
-      return <span className="badge error">Error</span>;
+      return <span className="badge error">error</span>;
     case "recording":
-      return <span className="badge live">● Grabando</span>;
+      return (
+        <span className="badge live">
+          <span className="signal-square" />
+          grabando
+        </span>
+      );
     case "pending":
-      return <span className="badge">En cola</span>;
+      return <span className="badge pending">en cola</span>;
     case "processing": {
       const fraction = progress?.fraction ?? 0;
       return (

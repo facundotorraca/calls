@@ -20,7 +20,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
           </h4>
           <ul className="decisions">
             {summary.decisions.map((decision, i) => (
-              <li key={i}>
+              <li key={i} className="row-tick">
                 <CheckCircleIcon />
                 <span>{decision}</span>
               </li>
@@ -36,8 +36,8 @@ export function SummaryView({ summary }: { summary: Summary }) {
           </h4>
           <ul className="todos">
             {summary.action_items.map((item, i) => (
-              <li key={i}>
-                <span className="todo-ring" />
+              <li key={i} className="row-tick">
+                <span className="todo-box" />
                 <div>
                   <p>{item.task}</p>
                   {(item.owner || item.due) && (

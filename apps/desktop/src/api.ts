@@ -61,6 +61,21 @@ export interface CallDetail {
   summary: Summary | null;
 }
 
+/** A folder's tint; mirrors `FolderColor` in crates/core/src/library.rs. */
+export type FolderColor = "red" | "yellow" | "green" | "blue";
+
+export const FOLDER_COLORS: Record<FolderColor, string> = {
+  red: "Rojo",
+  yellow: "Amarillo",
+  green: "Verde",
+  blue: "Azul",
+};
+
+export interface Folder {
+  name: string;
+  color?: FolderColor;
+}
+
 export interface Doctor {
   ffmpeg: string | null;
   whisper_cli: string | null;
@@ -88,10 +103,12 @@ export const api = {
   renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
   /** `null` takes the call out of any folder; a new name creates the folder. */
   moveCall: (id: CallId, folder: string | null) => invoke<Call>("move_call", { id, folder }),
-  listFolders: () => invoke<string[]>("list_folders"),
+  listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<string>("create_folder", { name }),
   renameFolder: (from: string, to: string) => invoke<void>("rename_folder", { from, to }),
   deleteFolder: (name: string) => invoke<void>("delete_folder", { name }),
+  /** `null` clears the color. */
+  setFolderColor: (name: string, color: FolderColor | null) => invoke<void>("set_folder_color", { name, color }),
   doctor: () => invoke<Doctor>("doctor"),
   islandState: () => invoke<Island>("island_state"),
   startRecording: () => invoke<CallId>("start_recording"),
@@ -114,7 +131,8 @@ export interface Levels {
 }
 
 export const onIsland = (handler: (island: Island) => void) => listen<Island>("island", (e) => handler(e.payload));
-export const onLevels = (handler: (levels: Levels) => void) => listen<Levels>("audio_levels", (e) => handler(e.payload));
+export const onLevels = (handler: (levels: Levels) => void) =>
+  listen<Levels>("audio_levels", (e) => handler(e.payload));
 export const onLibraryChanged = (handler: () => void) => listen("library_changed", () => handler());
 export const onSelectCall = (handler: (id: CallId) => void) => listen<CallId>("select_call", (e) => handler(e.payload));
 

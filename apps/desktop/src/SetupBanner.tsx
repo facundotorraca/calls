@@ -9,19 +9,35 @@ export function SetupBanner({ doctor }: { doctor: Doctor }) {
   if (!doctor.calls_audio) missing.push(["calls-audio (grabar llamadas)", "make sidecars"]);
   if (missing.length === 0) {
     // Not blocking: transcripts work without the LLM.
-    return doctor.llm_error ? <div className="banner warning">Resúmenes no disponibles: {doctor.llm_error}</div> : null;
+    return doctor.llm_error ? (
+      <div className="banner">
+        <div className="banner-rail tech-label">
+          <span>resúmenes no disponibles</span>
+        </div>
+        <div className="banner-body muted">{doctor.llm_error}</div>
+      </div>
+    ) : null;
   }
 
   return (
-    <div className="banner warning">
-      <strong>Falta configurar algunas cosas para poder transcribir:</strong>
-      <ul>
-        {missing.map(([what, fix]) => (
-          <li key={what}>
-            {what}: <code>{fix}</code>
-          </li>
-        ))}
-      </ul>
+    <div className="banner">
+      <div className="banner-rail tech-label">
+        <span>configuración</span>
+        <span>
+          {missing.length} pendiente{missing.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="banner-body">
+        <p className="muted">Falta configurar algunas cosas para poder transcribir:</p>
+        <ul>
+          {missing.map(([what, fix]) => (
+            <li key={what}>
+              {what}
+              <code>{fix}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type Call, type CallDetail } from "./api";
+import { api, type Call, type CallDetail, type Folder } from "./api";
 import type { ProgressMap } from "./CallList";
 import { formatDate, formatDuration, stepLabel } from "./format";
-import { ChevronIcon, FinderIcon, FolderIcon, PencilIcon, SparklesIcon, TextIcon } from "./icons";
-import { CopyButton, Section } from "./Section";
+import { folderColor, FolderMark } from "./Folders";
+import { ChevronIcon, FinderIcon, PencilIcon } from "./icons";
+import { CopyButton, TabPanel, TabRail, type Tab } from "./Tabs";
 import { plural, summaryMeta, summaryText, SummaryView } from "./SummaryView";
 import { speakers, transcriptText, TranscriptView } from "./TranscriptView";
-import { popupMenu } from "./ui";
+import { popupMenu, usePersistentState } from "./ui";
 
 interface Props {
   call: Call;
   progress?: ProgressMap[string];
-  folders: string[];
+  folders: Folder[];
   /** Switch the title to editing ("Renombrar" in the sidebar), then call `onRenameStarted`. */
   renameRequested: boolean;
   onRenameStarted: () => void;
@@ -37,6 +38,47 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
   const summary = current?.summary ?? null;
   const state = call.status.state;
   const summarizing = state === "processing" && call.status.step === "summarize";
+  // The open tab is remembered across calls: reading summaries one after another stays on summaries.
+  const [tabId, setTabId] = usePersistentState("call.tab", "summary");
+
+  const tabs: Tab[] = [];
+  if (transcript && (summary || summarizing || state === "ready")) {
+    tabs.push({
+      id: "summary",
+      label: "resumen",
+      meta: summary && summaryMeta(summary),
+      actions: summary && <CopyButton text={() => summaryText(summary)} />,
+      content: summary ? (
+        <SummaryView summary={summary} />
+      ) : summarizing ? (
+        <div className="tab-placeholder">
+          <span className="spinner" />
+          Resumiendo la llamada…
+        </div>
+      ) : (
+        <div className="tab-placeholder">
+          Esta llamada todavía no tiene resumen.
+          <button className="button" onClick={() => api.processCall(call.id)}>
+            generar resumen
+          </button>
+        </div>
+      ),
+    });
+  }
+  if (transcript) {
+    const people = speakers(transcript).length;
+    const last = transcript.segments[transcript.segments.length - 1];
+    tabs.push({
+      id: "transcript",
+      label: "transcripción",
+      meta: [last && formatDuration(last.end_ms), people > 1 && plural(people, "hablante", "hablantes")]
+        .filter(Boolean)
+        .join(" · "),
+      actions: <CopyButton text={() => transcriptText(transcript)} />,
+      content: <TranscriptView transcript={transcript} />,
+    });
+  }
+  const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0];
 
   const rename = async (title: string) => {
     try {
@@ -60,106 +102,82 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
     popupMenu([
       { text: "Sin carpeta", checked: !call.folder, action: () => move(null) },
       ...(folders.length > 0 ? (["separator"] as const) : []),
-      ...folders.map((name) => ({ text: name, checked: call.folder === name, action: () => move(name) })),
+      ...folders.map(({ name }) => ({ text: name, checked: call.folder === name, action: () => move(name) })),
     ]);
 
   return (
     <article className="call-view">
-      <header className="call-header">
-        <button className="folder-chip" onClick={folderMenu} title="Mover a otra carpeta">
-          <FolderIcon />
-          {call.folder ?? "Sin carpeta"}
-          <ChevronIcon className="folder-chip-chevron" />
-        </button>
-        <EditableTitle
-          key={call.id}
-          title={call.title}
-          editRequested={renameRequested}
-          onEditStarted={onRenameStarted}
-          onSave={rename}
-        />
-        <div className="call-subheader">
-          <p className="muted">
+      <header className="call-header dot-grid">
+        <div className="call-rail tech-label">
+          <button className="folder-chip tech-label" onClick={folderMenu} title="Mover a otra carpeta">
+            <FolderMark color={folderColor(folders, call.folder)} />
+            {call.folder ?? "sin carpeta"}
+            <ChevronIcon className="folder-chip-chevron" />
+          </button>
+          <span className="call-rail-meta">
             {formatDate(call.created_at)}
             {call.duration_ms != null && ` · ${formatDuration(call.duration_ms)}`}
-            {transcript?.language && ` · ${transcript.language.toUpperCase()}`}
-          </p>
+            {transcript?.language && ` · ${transcript.language}`}
+          </span>
+        </div>
+        <div className="call-title-row">
+          <EditableTitle
+            key={call.id}
+            title={call.title}
+            editRequested={renameRequested}
+            onEditStarted={onRenameStarted}
+            onSave={rename}
+          />
           {current && (
-            <button className="ghost-button" onClick={() => revealItemInDir(current.dir)}>
+            <button className="ghost-button tech-label" onClick={() => revealItemInDir(current.dir)}>
               <FinderIcon />
-              Mostrar en Finder
+              finder
             </button>
           )}
         </div>
       </header>
 
-      {call.status.state === "failed" && (
-        <div className="banner error">
-          <strong>Falló: {stepLabel(call.status.step)}</strong>
-          <pre>{call.status.error}</pre>
-          <button className="button" onClick={() => api.processCall(call.id)}>
-            Reintentar
-          </button>
-        </div>
-      )}
+      {activeTab && <TabRail tabs={tabs} active={activeTab} onSelect={setTabId} />}
 
-      {state === "recording" && (
-        <div className="processing">
-          <p>Grabando… la transcripción empieza al terminar la llamada.</p>
-        </div>
-      )}
-
-      {(state === "pending" || state === "processing") && !summarizing && (
-        <div className="processing">
-          <p>{call.status.state === "processing" ? stepLabel(call.status.step) : "En cola"}…</p>
-          <div className="bar large">
-            <span style={{ width: `${(progress?.fraction ?? 0) * 100}%` }} />
-          </div>
-        </div>
-      )}
-
-      {transcript && (summary || summarizing || state === "ready") && (
-        <Section
-          id="summary"
-          icon={<SparklesIcon />}
-          title="Resumen"
-          meta={summary && summaryMeta(summary)}
-          actions={summary && <CopyButton text={() => summaryText(summary)} />}
-        >
-          {summary ? (
-            <SummaryView summary={summary} />
-          ) : summarizing ? (
-            <div className="section-placeholder">
-              <span className="spinner" />
-              Resumiendo la llamada…
+      <div className="call-body">
+        {call.status.state === "failed" && (
+          <div className="banner error">
+            <div className="banner-rail tech-label">
+              <span>falló: {stepLabel(call.status.step)}</span>
             </div>
-          ) : (
-            <div className="section-placeholder">
-              Esta llamada todavía no tiene resumen.
+            <div className="banner-body">
+              <pre>{call.status.error}</pre>
               <button className="button" onClick={() => api.processCall(call.id)}>
-                Generar resumen
+                reintentar
               </button>
             </div>
-          )}
-        </Section>
-      )}
+          </div>
+        )}
 
-      {transcript && (
-        <Section
-          id="transcript"
-          icon={<TextIcon />}
-          title="Transcripción"
-          meta={[
-            transcript.segments.length > 0 && formatDuration(transcript.segments[transcript.segments.length - 1].end_ms),
-            speakers(transcript).length > 1 && plural(speakers(transcript).length, "hablante", "hablantes"),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-          actions={<CopyButton text={() => transcriptText(transcript)} />}
-        >
-          <TranscriptView transcript={transcript} />
-        </Section>
-      )}
+        {state === "recording" && (
+          <div className="processing">
+            <p className="processing-label tech-label">
+              <span className="signal-square" />
+              grabando
+            </p>
+            <p>La transcripción empieza al terminar la llamada.</p>
+          </div>
+        )}
+
+        {(state === "pending" || state === "processing") && !summarizing && (
+          <div className="processing">
+            <p className="processing-label tech-label">
+              <span>{call.status.state === "processing" ? stepLabel(call.status.step) : "en cola"}</span>
+              {progress && progress.fraction > 0 && <span>{Math.round(progress.fraction * 100)}%</span>}
+            </p>
+            <div className="bar large">
+              <span style={{ width: `${(progress?.fraction ?? 0) * 100}%` }} />
+            </div>
+          </div>
+        )}
+
+        {activeTab && <TabPanel tab={activeTab} />}
+      </div>
     </article>
   );
 }

@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { api, type Call } from "./api";
+import { api, FOLDER_COLORS, type Call, type Folder, type FolderColor } from "./api";
 import type { DropTarget } from "./drag";
 import { FolderIcon, InboxIcon, PlusIcon, TrayIcon } from "./icons";
 import { popupMenu } from "./ui";
@@ -13,8 +13,20 @@ export function inScope(call: Call, scope: Scope): boolean {
   return call.folder === scope.name;
 }
 
+/** A folder's icon, tinted with its color. */
+export function FolderMark({ color }: { color?: FolderColor }) {
+  return (
+    <span className="folder-mark" data-color={color}>
+      <FolderIcon />
+    </span>
+  );
+}
+
+/** The color of the folder named `name`, if it has one. */
+export const folderColor = (folders: Folder[], name?: string) => folders.find((f) => f.name === name)?.color;
+
 interface Props {
-  folders: string[];
+  folders: Folder[];
   calls: Call[];
   scope: Scope;
   onScope: (scope: Scope) => void;
@@ -66,9 +78,30 @@ export function Folders({ folders, calls, scope, onScope, dropTarget, onChanged,
     }
   };
 
-  const folderMenu = (name: string) =>
+  const setColor = async (name: string, color: FolderColor | null) => {
+    try {
+      await api.setFolderColor(name, color);
+      await onChanged();
+    } catch (e) {
+      onError(e);
+    }
+  };
+
+  const folderMenu = ({ name, color }: Folder) =>
     popupMenu([
       { text: "Renombrar", action: () => setEditing({ kind: "rename", name }) },
+      {
+        text: "Color",
+        items: [
+          { text: "Sin color", checked: !color, action: () => setColor(name, null) },
+          "separator",
+          ...(Object.keys(FOLDER_COLORS) as FolderColor[]).map((key) => ({
+            text: FOLDER_COLORS[key],
+            checked: color === key,
+            action: () => setColor(name, key),
+          })),
+        ],
+      },
       "separator",
       { text: "Eliminar carpeta (las llamadas quedan)", action: () => remove(name) },
     ]);
@@ -94,29 +127,31 @@ export function Folders({ folders, calls, scope, onScope, dropTarget, onChanged,
       )}
 
       <div className="folders-header">
-        <span>Carpetas</span>
+        <span className="tech-label">carpetas</span>
         <button className="icon-button" title="Nueva carpeta" onClick={() => setEditing({ kind: "new" })}>
           <PlusIcon />
         </button>
       </div>
 
-      {folders.map((name) =>
-        editing?.kind === "rename" && editing.name === name ? (
+      {folders.map((folder) => {
+        const { name } = folder;
+        return editing?.kind === "rename" && editing.name === name ? (
           <NameInput key={name} initial={name} onSubmit={(to) => rename(name, to)} onCancel={() => setEditing(null)} />
         ) : (
           <NavItem
             key={name}
-            icon={<FolderIcon />}
+            icon={<FolderMark color={folder.color} />}
+            color={folder.color}
             label={name}
             count={count({ kind: "folder", name })}
             active={isScope({ kind: "folder", name })}
             onClick={() => onScope({ kind: "folder", name })}
             onDoubleClick={() => setEditing({ kind: "rename", name })}
-            onContextMenu={() => folderMenu(name)}
+            onContextMenu={() => folderMenu(folder)}
             drop={{ folder: name, over: dropTarget === name }}
           />
-        ),
-      )}
+        );
+      })}
 
       {editing?.kind === "new" && (
         <NameInput initial="Nueva carpeta" onSubmit={create} onCancel={() => setEditing(null)} />
@@ -132,6 +167,8 @@ export function Folders({ folders, calls, scope, onScope, dropTarget, onChanged,
 
 interface NavItemProps {
   icon: ReactNode;
+  /** Tints the "you are here" rule. */
+  color?: FolderColor;
   label: string;
   count: number;
   active: boolean;
@@ -141,10 +178,11 @@ interface NavItemProps {
   drop?: { folder: string | null; over: boolean };
 }
 
-function NavItem({ icon, label, count, active, onClick, onDoubleClick, onContextMenu, drop }: NavItemProps) {
+function NavItem({ icon, color, label, count, active, onClick, onDoubleClick, onContextMenu, drop }: NavItemProps) {
   return (
     <button
       className={`nav-item ${active ? "active" : ""} ${drop?.over ? "drop-over" : ""}`}
+      data-color={color}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => {

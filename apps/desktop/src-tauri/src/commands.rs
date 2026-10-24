@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use calls_core::summary::Summary;
-use calls_core::{Call, CallId, Status, Transcript};
+use calls_core::{Call, CallId, Folder, FolderColor, Status, Transcript};
 use calls_engines::Doctor;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -72,8 +72,14 @@ pub async fn move_call(state: State<'_, AppState>, id: CallId, folder: Option<St
 }
 
 #[tauri::command]
-pub async fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
+pub async fn list_folders(state: State<'_, AppState>) -> CmdResult<Vec<Folder>> {
     state.library.folders().map_err(to_string)
+}
+
+/// Sets a folder's color, or clears it with `null`.
+#[tauri::command]
+pub async fn set_folder_color(state: State<'_, AppState>, name: String, color: Option<FolderColor>) -> CmdResult<()> {
+    state.library.set_folder_color(&name, color).map_err(to_string)
 }
 
 #[tauri::command]

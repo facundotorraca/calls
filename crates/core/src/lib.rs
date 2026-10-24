@@ -16,7 +16,7 @@ pub mod summary;
 pub mod transcript;
 
 pub use call::{Call, CallId, Status, Track, TrackRole};
-pub use library::Library;
+pub use library::{Folder, FolderColor, Library};
 pub use pipeline::{Event, Pipeline, Step, StepContext};
 pub use settings::Settings;
 pub use transcript::{Segment, Transcript};

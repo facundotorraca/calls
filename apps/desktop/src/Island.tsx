@@ -25,7 +25,7 @@ function render(island: IslandState) {
           <span className="island-dot idle" />
           <span className="island-text">Llamada en {island.app_name}</span>
           <button className="island-button record" onClick={() => api.startRecording()}>
-            Grabar
+            grabar
           </button>
           <button className="island-close" onClick={() => api.dismissIsland()} aria-label="Cerrar">
             ×
@@ -39,7 +39,7 @@ function render(island: IslandState) {
           <Elapsed since={island.started_at_ms} />
           <Meters />
           <button className="island-button" onClick={() => api.stopRecording()}>
-            Detener
+            detener
           </button>
         </>
       );

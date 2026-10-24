@@ -58,6 +58,7 @@ fn main() {
             commands::create_folder,
             commands::rename_folder,
             commands::delete_folder,
+            commands::set_folder_color,
             commands::doctor,
             commands::island_state,
             commands::start_recording,

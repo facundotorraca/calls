@@ -12,6 +12,7 @@ import {
   type Call,
   type CallId,
   type Doctor,
+  type Folder,
   type Island,
 } from "./api";
 import { CallList, SORT_LABELS, sortCalls, type ProgressMap, type Sort } from "./CallList";
@@ -20,11 +21,12 @@ import { useCallDrag } from "./drag";
 import { Folders, inScope, type Scope } from "./Folders";
 import { SearchIcon, SortIcon } from "./icons";
 import { SetupBanner } from "./SetupBanner";
+import { plural } from "./SummaryView";
 import { normalize, popupMenu, usePersistentState } from "./ui";
 
 export function App() {
   const [calls, setCalls] = useState<Call[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [selected, setSelected] = useState<CallId | null>(null);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [doctor, setDoctor] = useState<Doctor | null>(null);
@@ -49,7 +51,7 @@ export function App() {
 
   // A remembered folder that no longer exists falls back to every call.
   useEffect(() => {
-    if (loaded && scope.kind === "folder" && !folders.includes(scope.name)) setScope({ kind: "all" });
+    if (loaded && scope.kind === "folder" && !folders.some((f) => f.name === scope.name)) setScope({ kind: "all" });
   }, [loaded, folders, scope, setScope]);
 
   const moveCall = useCallback(
@@ -90,7 +92,7 @@ export function App() {
 
   const toggleRecording = async () => {
     try {
-      if (island.kind === "recording") await api.stopRecording();
+      if (recording) await api.stopRecording();
       else setSelected(await api.startRecording());
     } catch (e) {
       showError(e);
@@ -163,7 +165,11 @@ export function App() {
         items: [
           { text: "Sin carpeta", checked: !call.folder, action: () => moveCall(call, null) },
           ...(folders.length > 0 ? (["separator"] as const) : []),
-          ...folders.map((name) => ({ text: name, checked: call.folder === name, action: () => moveCall(call, name) })),
+          ...folders.map(({ name }) => ({
+            text: name,
+            checked: call.folder === name,
+            action: () => moveCall(call, name),
+          })),
         ],
       },
       "separator",
@@ -181,18 +187,25 @@ export function App() {
 
   const current = calls.find((c) => c.id === selected) ?? null;
   const searching = query.trim().length > 0;
+  const recording = island.kind === "recording";
+  const working = calls.filter((c) => c.status.state === "pending" || c.status.state === "processing").length;
 
   return (
     <div className={`app ${drag ? "dragging-call" : ""}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
-          <h1>Llamadas</h1>
+          <h1 className="wordmark">calls</h1>
           <div className="actions">
             <button className="button" onClick={pickFiles}>
-              Importar
+              importar
             </button>
-            <button className="button primary" onClick={toggleRecording} disabled={!doctor?.calls_audio}>
-              {island.kind === "recording" ? "■ Detener" : "● Grabar"}
+            <button
+              className={`button ${recording ? "live" : "primary"}`}
+              onClick={toggleRecording}
+              disabled={!doctor?.calls_audio}
+            >
+              {recording && <span className="signal-square" />}
+              {recording ? "detener" : "grabar"}
             </button>
           </div>
         </header>
@@ -230,6 +243,7 @@ export function App() {
             sort={sort}
             selected={selected}
             progress={progress}
+            folders={folders}
             showFolder={searching || scope.kind === "all"}
             dragging={drag?.call.id}
             emptyText={
@@ -249,8 +263,12 @@ export function App() {
       <main className="content">
         {doctor && <SetupBanner doctor={doctor} />}
         {error && (
-          <div className="banner error" onClick={() => setError(null)}>
-            {error}
+          <div className="banner error banner-dismiss" onClick={() => setError(null)}>
+            <div className="banner-rail tech-label">
+              <span>error</span>
+              <span>cerrar ×</span>
+            </div>
+            <div className="banner-body">{error}</div>
           </div>
         )}
         {current ? (
@@ -264,19 +282,39 @@ export function App() {
             onError={showError}
           />
         ) : (
-          <div className="empty">
-            <p className="empty-title">Arrastrá una grabación acá</p>
-            <p className="muted">Video o audio: OBS, Zoom, Meet, notas de voz…</p>
+          <section className="empty">
+            <p className="empty-label tech-label">sin llamadas</p>
+            <p className="empty-title">Arrastrá una grabación acá.</p>
+            <p className="empty-hint">Video o audio: OBS, Zoom, Meet, notas de voz…</p>
             <button className="button" onClick={pickFiles}>
-              Elegir archivos
+              elegir archivos
             </button>
-          </div>
+          </section>
         )}
       </main>
 
+      <footer className="statusbar tech-label">
+        <span>calls — transcripción local</span>
+        <span className="statusbar-state">
+          {recording ? (
+            <>
+              <span className="signal-square" />
+              grabando
+            </>
+          ) : working > 0 ? (
+            <>
+              <span className="spinner" />
+              {working} en proceso
+            </>
+          ) : (
+            plural(calls.length, "llamada", "llamadas")
+          )}
+        </span>
+      </footer>
+
       {dragging && (
         <div className="drop-overlay">
-          <p>Soltá para transcribir</p>
+          <p className="tech-label">soltá para transcribir</p>
         </div>
       )}
 

@@ -20,6 +20,27 @@ struct Index {
     /// Folder names, kept here so empty folders survive.
     #[serde(default)]
     folders: Vec<String>,
+    /// Colors chosen for folders, by name. Folders without one are not listed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    colors: BTreeMap<String, FolderColor>,
+}
+
+/// A folder as the sidebar shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Folder {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<FolderColor>,
+}
+
+/// The tint a folder is marked with, from a short fixed palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderColor {
+    Red,
+    Yellow,
+    Green,
+    Blue,
 }
 
 /// The folder holding every call, one sub-folder per call:
@@ -130,9 +151,24 @@ impl Library {
         self.update(id, |call| call.folder = folder)
     }
 
-    /// Folder names, alphabetically.
-    pub fn folders(&self) -> Result<Vec<String>> {
-        Ok(self.index()?.folders)
+    /// Folders, alphabetically.
+    pub fn folders(&self) -> Result<Vec<Folder>> {
+        let index = self.index()?;
+        Ok(index.folders.into_iter().map(|name| Folder { color: index.colors.get(&name).copied(), name }).collect())
+    }
+
+    /// Sets a folder's color, or clears it with `None`.
+    pub fn set_folder_color(&self, name: &str, color: Option<FolderColor>) -> Result<()> {
+        let _guard = self.lock();
+        let mut index = self.index()?;
+        if !index.folders.iter().any(|f| f == name) {
+            bail!("folder {name} not found");
+        }
+        match color {
+            Some(color) => index.colors.insert(name.into(), color),
+            None => index.colors.remove(name),
+        };
+        self.write_index(&mut index)
     }
 
     /// Creates a folder and returns its name. A folder with the same name, ignoring case,
@@ -159,6 +195,9 @@ impl Library {
         }
         let Some(folder) = index.folders.iter_mut().find(|f| *f == from) else { bail!("folder {from} not found") };
         *folder = to.clone();
+        if let Some(color) = index.colors.remove(from) {
+            index.colors.insert(to.clone(), color);
+        }
         self.write_index(&mut index)?;
         self.relabel(from, Some(&to))
     }
@@ -168,6 +207,7 @@ impl Library {
         let _guard = self.lock();
         let mut index = self.index()?;
         index.folders.retain(|f| f != name);
+        index.colors.remove(name);
         self.write_index(&mut index)?;
         self.relabel(name, None)
     }
@@ -363,7 +403,7 @@ mod tests {
         library.rename(&processing.id, "Kickoff ACME").unwrap();
         assert_eq!(library.create_folder("clientes").unwrap(), "Clientes");
         library.create_folder("Acme").unwrap();
-        assert_eq!(library.folders().unwrap(), ["Acme", "Clientes"]);
+        assert_eq!(names(&library), ["Acme", "Clientes"]);
 
         // The pipeline saving its copy keeps what the user changed meanwhile.
         processing.status = Status::Ready;
@@ -374,13 +414,35 @@ mod tests {
             ("Kickoff ACME", Some("Clientes"), Status::Ready)
         );
 
+        library.set_folder_color("Clientes", Some(FolderColor::Blue)).unwrap();
+        assert!(library.set_folder_color("Nope", Some(FolderColor::Red)).is_err());
+
+        // The color travels with a rename.
         library.rename_folder("Clientes", "Clientes 2026").unwrap();
         assert_eq!(library.load(&call.id).unwrap().folder.as_deref(), Some("Clientes 2026"));
         assert!(library.rename_folder("Acme", "clientes 2026").is_err());
+        assert_eq!(
+            library.folders().unwrap(),
+            [
+                Folder { name: "Acme".into(), color: None },
+                Folder { name: "Clientes 2026".into(), color: Some(FolderColor::Blue) },
+            ]
+        );
 
+        // Deleting forgets the color: a new folder with the same name starts plain.
         library.delete_folder("Clientes 2026").unwrap();
         assert_eq!(library.load(&call.id).unwrap().folder, None);
-        assert_eq!(library.folders().unwrap(), ["Acme"]);
+        assert_eq!(names(&library), ["Acme"]);
+        library.create_folder("Clientes 2026").unwrap();
+        assert_eq!(library.folders().unwrap()[1].color, None);
+
+        library.set_folder_color("Acme", Some(FolderColor::Red)).unwrap();
+        library.set_folder_color("Acme", None).unwrap();
+        assert_eq!(library.folders().unwrap()[0].color, None);
         fs::remove_dir_all(tmp).unwrap();
+    }
+
+    fn names(library: &Library) -> Vec<String> {
+        library.folders().unwrap().into_iter().map(|f| f.name).collect()
     }
 }

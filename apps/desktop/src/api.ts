@@ -88,6 +88,50 @@ export interface Doctor {
   llm_error: string | null;
 }
 
+/** Mirrors `Settings` in crates/core/src/settings.rs. Sent back whole when saving. */
+export interface Settings {
+  library_dir: string;
+  /** ISO 639-1 code, or `auto`. */
+  language: string;
+  whisper_model: string;
+  vad_model: string | null;
+  detect_calls: boolean;
+  auto_record: boolean;
+  call_apps: unknown[];
+  summarize: boolean;
+  /** Written into the prompt, e.g. `español`. */
+  summary_language: string;
+  llm: { base_url: string; model: string };
+}
+
+/** A whisper.cpp model offered or on disk (crates/engines/src/models.rs). */
+export interface LocalModel {
+  name: string;
+  note: string | null;
+  /** On disk if downloaded, otherwise the size of the download. */
+  bytes: number | null;
+  downloaded: boolean;
+}
+
+export interface OllamaModel {
+  name: string;
+  size: number;
+  details: { parameter_size: string; quantization_level: string };
+}
+
+export interface DownloadTarget {
+  kind: "whisper" | "vad" | "ollama";
+  name: string;
+}
+
+export type DownloadEvent = DownloadTarget &
+  (
+    | { state: "progress"; fraction: number }
+    | { state: "done" }
+    | { state: "failed"; error: string }
+    | { state: "cancelled" }
+  );
+
 export type PipelineEvent =
   | { kind: "step_started"; call_id: CallId; step: string }
   | { kind: "step_progress"; call_id: CallId; step: string; fraction: number }
@@ -115,6 +159,17 @@ export const api = {
   stopRecording: () => invoke<void>("stop_recording"),
   dismissIsland: () => invoke<void>("dismiss_island"),
   showCall: (id: CallId) => invoke<void>("show_call", { id }),
+  getSettings: () => invoke<Settings>("get_settings"),
+  updateSettings: (settings: Settings) => invoke<void>("update_settings", { settings }),
+  openSettings: () => invoke<void>("open_settings"),
+  localModels: (kind: "whisper" | "vad") => invoke<LocalModel[]>("local_models", { kind }),
+  deleteLocalModel: (name: string) => invoke<void>("delete_local_model", { name }),
+  /** Fails if Ollama is not running. */
+  ollamaModels: () => invoke<OllamaModel[]>("ollama_models"),
+  deleteOllamaModel: (name: string) => invoke<void>("delete_ollama_model", { name }),
+  downloads: () => invoke<(DownloadTarget & { fraction: number })[]>("downloads"),
+  startDownload: (target: DownloadTarget) => invoke<void>("start_download", { target }),
+  cancelDownload: (target: DownloadTarget) => invoke<void>("cancel_download", { target }),
 };
 
 /** What the island shows; mirrors `Island` in src-tauri/src/recorder.rs. */
@@ -135,6 +190,10 @@ export const onLevels = (handler: (levels: Levels) => void) =>
   listen<Levels>("audio_levels", (e) => handler(e.payload));
 export const onLibraryChanged = (handler: () => void) => listen("library_changed", () => handler());
 export const onSelectCall = (handler: (id: CallId) => void) => listen<CallId>("select_call", (e) => handler(e.payload));
+
+export const onSettingsChanged = (handler: () => void) => listen("settings_changed", () => handler());
+export const onDownload = (handler: (event: DownloadEvent) => void) =>
+  listen<DownloadEvent>("download", (e) => handler(e.payload));
 
 export function onPipelineEvent(handler: (event: PipelineEvent) => void): Promise<UnlistenFn> {
   return listen<PipelineEvent>("pipeline", (e) => handler(e.payload));

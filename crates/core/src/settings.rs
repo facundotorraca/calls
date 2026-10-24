@@ -82,11 +82,11 @@ impl Settings {
     }
 
     pub fn whisper_model_path(&self) -> PathBuf {
-        models_dir().join(format!("ggml-{}.bin", self.whisper_model))
+        model_path(&self.whisper_model)
     }
 
     pub fn vad_model_path(&self) -> Option<PathBuf> {
-        self.vad_model.as_ref().map(|name| models_dir().join(format!("ggml-{name}.bin")))
+        self.vad_model.as_deref().map(model_path)
     }
 }
 
@@ -97,6 +97,11 @@ pub fn data_dir() -> PathBuf {
 
 pub fn models_dir() -> PathBuf {
     data_dir().join("models")
+}
+
+/// Where a whisper.cpp model (transcription or VAD) named `name` lives.
+pub fn model_path(name: &str) -> PathBuf {
+    models_dir().join(format!("ggml-{name}.bin"))
 }
 
 pub fn settings_path() -> PathBuf {

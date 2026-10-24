@@ -27,4 +27,11 @@ export function formatTimestamp(ms: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** `1.6 GB`, `885 KB`: decimal units, like Finder. */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.round(bytes / 1e3)} KB`;
+}
+
 export const stepLabel = (step: string) => STEP_LABELS[step] ?? step;

@@ -8,6 +8,7 @@ import {
   onLibraryChanged,
   onPipelineEvent,
   onSelectCall,
+  onSettingsChanged,
   MEDIA_EXTENSIONS,
   type Call,
   type CallId,
@@ -19,7 +20,7 @@ import { CallList, SORT_LABELS, sortCalls, type ProgressMap, type Sort } from ".
 import { CallView } from "./CallView";
 import { useCallDrag } from "./drag";
 import { Folders, inScope, type Scope } from "./Folders";
-import { SearchIcon, SortIcon } from "./icons";
+import { SearchIcon, SlidersIcon, SortIcon } from "./icons";
 import { SetupBanner } from "./SetupBanner";
 import { plural } from "./SummaryView";
 import { normalize, popupMenu, usePersistentState } from "./ui";
@@ -111,6 +112,8 @@ export function App() {
       onIsland(setIsland),
       onLibraryChanged(() => refresh()),
       onSelectCall((id) => refresh().then(() => setSelected(id))),
+      // A model chosen or downloaded in the settings may fix (or break) the setup.
+      onSettingsChanged(() => api.doctor().then(setDoctor)),
     ];
     return () => unlisteners.forEach((u) => void u.then((fn) => fn()));
   }, [refresh]);
@@ -223,6 +226,9 @@ export function App() {
           </label>
           <button className="icon-button" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
             <SortIcon />
+          </button>
+          <button className="icon-button" onClick={() => api.openSettings()} title="Ajustes (⌘,)">
+            <SlidersIcon />
           </button>
         </div>
 

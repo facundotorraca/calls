@@ -3,19 +3,31 @@
 
 use std::path::PathBuf;
 
+use anyhow::bail;
 use calls_core::summary::Summary;
-use calls_core::{Call, CallId, Folder, FolderColor, Status, Transcript};
+use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};
 use calls_engines::Doctor;
+use calls_engines::models::{self, LocalModel, ModelKind};
+use calls_engines::ollama::{self, InstalledModel};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::downloads::{Running, Target};
 use crate::recorder::Island;
 use crate::{AppState, show_main};
+
+/// Event telling every window the settings changed.
+const SETTINGS_EVENT: &str = "settings_changed";
 
 type CmdResult<T> = Result<T, String>;
 
 fn to_string(e: anyhow::Error) -> String {
     format!("{e:#}")
+}
+
+/// Runs blocking work (HTTP to Ollama, the filesystem) off the async runtime.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> anyhow::Result<T> + Send + 'static) -> CmdResult<T> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?.map_err(to_string)
 }
 
 #[derive(Serialize)]
@@ -100,7 +112,84 @@ pub async fn delete_folder(state: State<'_, AppState>, name: String) -> CmdResul
 
 #[tauri::command]
 pub async fn doctor(state: State<'_, AppState>) -> CmdResult<Doctor> {
-    Ok(Doctor::check(&state.settings))
+    let settings = state.settings();
+    blocking(move || Ok(Doctor::check(&settings))).await
+}
+
+#[tauri::command]
+pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
+    Ok(state.settings())
+}
+
+/// Saves the settings and applies them: the next call processed uses them.
+#[tauri::command]
+pub async fn update_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> CmdResult<()> {
+    // The library is opened at launch; moving it is not something to do from under it.
+    settings.library_dir = state.settings().library_dir;
+    settings.save(&settings::settings_path()).map_err(to_string)?;
+    *state.settings.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = settings;
+    app.emit(SETTINGS_EVENT, ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_settings(app: AppHandle) -> CmdResult<()> {
+    crate::open_settings(&app);
+    Ok(())
+}
+
+/// The whisper.cpp models offered and the ones on disk.
+#[tauri::command]
+pub async fn local_models(kind: ModelKind) -> CmdResult<Vec<LocalModel>> {
+    blocking(move || Ok(models::list(kind))).await
+}
+
+#[tauri::command]
+pub async fn delete_local_model(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    let settings = state.settings();
+    blocking(move || {
+        if settings.whisper_model == name || settings.vad_model.as_deref() == Some(name.as_str()) {
+            bail!("{name} is in use; choose another model first");
+        }
+        models::delete(&name)
+    })
+    .await
+}
+
+/// The models Ollama has. Fails if Ollama is not running.
+#[tauri::command]
+pub async fn ollama_models(state: State<'_, AppState>) -> CmdResult<Vec<InstalledModel>> {
+    let url = state.settings().llm.base_url;
+    blocking(move || ollama::installed(&url)).await
+}
+
+#[tauri::command]
+pub async fn delete_ollama_model(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    let llm = state.settings().llm;
+    blocking(move || {
+        if llm.model == name {
+            bail!("{name} is in use; choose another model first");
+        }
+        ollama::delete(&llm.base_url, &name)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn downloads(state: State<'_, AppState>) -> CmdResult<Vec<Running>> {
+    Ok(state.downloads.running())
+}
+
+/// Starts a download in the background; progress arrives as `download` events.
+#[tauri::command]
+pub async fn start_download(app: AppHandle, state: State<'_, AppState>, target: Target) -> CmdResult<()> {
+    state.downloads.start(&app, target, state.settings().llm.base_url);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_download(state: State<'_, AppState>, target: Target) -> CmdResult<()> {
+    state.downloads.cancel(&target);
+    Ok(())
 }
 
 #[tauri::command]

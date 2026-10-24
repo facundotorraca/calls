@@ -1,12 +1,17 @@
 //! Local LLM served by [Ollama](https://ollama.com), over its HTTP API.
 
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use calls_core::engines::Llm;
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+const NOT_RUNNING: &str = "Ollama is not running (open the Ollama app)";
 
 pub struct Ollama {
     base_url: String,
@@ -23,22 +28,7 @@ impl Ollama {
 
     /// Whether Ollama is running and has the model.
     pub fn check(&self) -> Result<()> {
-        #[derive(Deserialize)]
-        struct Tags {
-            models: Vec<Model>,
-        }
-        #[derive(Deserialize)]
-        struct Model {
-            name: String,
-        }
-        let tags: Tags = self
-            .client
-            .get(format!("{}/api/tags", self.base_url))
-            .timeout(Duration::from_secs(3))
-            .send()
-            .context("Ollama is not running (open the Ollama app)")?
-            .json()?;
-        if !tags.models.iter().any(|m| m.name == self.model) {
+        if !installed(&self.base_url)?.iter().any(|m| m.name == self.model) {
             bail!("Ollama does not have {} (ollama pull {})", self.model, self.model);
         }
         Ok(())
@@ -70,12 +60,8 @@ impl Ollama {
         struct Message {
             content: String,
         }
-        let response = self
-            .client
-            .post(format!("{}/api/chat", self.base_url))
-            .json(&body)
-            .send()
-            .context("Ollama is not running (open the Ollama app)")?;
+        let response =
+            self.client.post(format!("{}/api/chat", self.base_url)).json(&body).send().context(NOT_RUNNING)?;
         if !response.status().is_success() {
             bail!("Ollama: {} {}", response.status(), response.text().unwrap_or_default());
         }
@@ -98,6 +84,108 @@ impl Llm for Ollama {
         let answer = self.chat(system, prompt, schema.clone(), true)?;
         serde_json::from_str(&answer).context("the model did not answer with JSON")
     }
+}
+
+/// A model Ollama has downloaded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledModel {
+    pub name: String,
+    /// Bytes on disk.
+    pub size: u64,
+    #[serde(default)]
+    pub details: ModelDetails,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelDetails {
+    /// e.g. `35B`.
+    #[serde(default)]
+    pub parameter_size: String,
+    /// e.g. `Q4_K_M`.
+    #[serde(default)]
+    pub quantization_level: String,
+}
+
+/// The models Ollama at `base_url` has, as `ollama list` shows them.
+pub fn installed(base_url: &str) -> Result<Vec<InstalledModel>> {
+    #[derive(Deserialize)]
+    struct Tags {
+        models: Vec<InstalledModel>,
+    }
+    let tags: Tags = Client::new()
+        .get(endpoint(base_url, "tags"))
+        .timeout(Duration::from_secs(3))
+        .send()
+        .context(NOT_RUNNING)?
+        .error_for_status()?
+        .json()?;
+    Ok(tags.models)
+}
+
+/// Downloads a model, like `ollama pull`. Ollama keeps what it got if cancelled, so pulling
+/// the same model again resumes.
+pub fn pull(base_url: &str, model: &str, progress: &dyn Fn(f32), cancelled: &AtomicBool) -> Result<()> {
+    #[derive(Deserialize)]
+    struct Line {
+        #[serde(default)]
+        error: Option<String>,
+        #[serde(default)]
+        digest: Option<String>,
+        #[serde(default)]
+        total: Option<u64>,
+        #[serde(default)]
+        completed: Option<u64>,
+    }
+    let client = Client::builder().connect_timeout(Duration::from_secs(5)).timeout(None).build()?;
+    let response = client
+        .post(endpoint(base_url, "pull"))
+        .json(&json!({ "model": model, "stream": true }))
+        .send()
+        .context(NOT_RUNNING)?;
+    if !response.status().is_success() {
+        bail!("Ollama: {} {}", response.status(), response.text().unwrap_or_default());
+    }
+
+    // A model is several layers, each reported on its own; progress is over all of them.
+    let mut layers: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut reported = 0.0f32;
+    for line in BufReader::new(response).lines() {
+        if cancelled.load(Ordering::Relaxed) {
+            bail!("cancelled");
+        }
+        let line: Line = serde_json::from_str(&line?)?;
+        if let Some(error) = line.error {
+            bail!("Ollama: {error}");
+        }
+        if let (Some(digest), Some(total)) = (line.digest, line.total) {
+            layers.insert(digest, (line.completed.unwrap_or(0), total));
+            let (done, total) = layers.values().fold((0, 0), |(d, t), (ld, lt)| (d + ld, t + lt));
+            let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+            // Ollama reports many times a second; every half percent is plenty.
+            if (fraction - reported).abs() >= 0.005 {
+                reported = fraction;
+                progress(fraction);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Deletes a downloaded model, like `ollama rm`.
+pub fn delete(base_url: &str, model: &str) -> Result<()> {
+    let response = Client::new()
+        .delete(endpoint(base_url, "delete"))
+        .json(&json!({ "model": model }))
+        .send()
+        .context(NOT_RUNNING)?;
+    if !response.status().is_success() {
+        bail!("Ollama: {} {}", response.status(), response.text().unwrap_or_default());
+    }
+    Ok(())
+}
+
+fn endpoint(base_url: &str, path: &str) -> String {
+    format!("{}/api/{path}", base_url.trim_end_matches('/'))
 }
 
 fn has_required_fields(value: &Value, schema: &Value) -> bool {

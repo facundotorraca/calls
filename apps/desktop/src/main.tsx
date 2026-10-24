@@ -3,12 +3,15 @@ import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { App } from "./App";
 import { Island } from "./Island";
+import { Settings } from "./Settings";
 import "./styles.css";
 
-// Both windows load this bundle; the label decides what to render.
-const isIsland = getCurrentWindow().label === "island";
-document.documentElement.classList.toggle("island-window", isIsland);
+// Every window loads this bundle; the label decides what to render.
+const label = getCurrentWindow().label;
+document.documentElement.classList.toggle("island-window", label === "island");
+
+const windows: Record<string, React.ReactNode> = { island: <Island />, settings: <Settings /> };
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>{isIsland ? <Island /> : <App />}</React.StrictMode>,
+  <React.StrictMode>{windows[label] ?? <App />}</React.StrictMode>,
 );

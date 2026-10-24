@@ -123,7 +123,8 @@ impl Recorder {
     }
 
     fn on_audio_apps(&self, app: &AppHandle, st: &AppState, apps: &[AudioProcess]) {
-        if !st.settings.detect_calls {
+        let settings = st.settings();
+        if !settings.detect_calls {
             return;
         }
         let mut s = self.lock();
@@ -133,7 +134,7 @@ impl Recorder {
                 if s.recording.is_some() {
                     return;
                 }
-                if st.settings.auto_record {
+                if settings.auto_record {
                     if let Err(e) = self.start_locked(app, st, &mut s) {
                         eprintln!("could not start recording: {e:#}");
                     }

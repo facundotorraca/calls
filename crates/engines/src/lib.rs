@@ -4,7 +4,8 @@
 
 pub mod audio;
 mod ffmpeg;
-mod ollama;
+pub mod models;
+pub mod ollama;
 mod process;
 pub mod python;
 pub mod sidecar;
@@ -69,9 +70,11 @@ impl Doctor {
             vad_model_present: settings.vad_model_path().is_some_and(|p| p.is_file()),
             library_dir: settings.library_dir.clone(),
             uv: sidecar::locate("uv"),
-            llm_error: Ollama::new(&settings.llm.base_url, &settings.llm.model)
-                .and_then(|llm| llm.check())
-                .err()
+            // Summaries turned off: nothing to report about the LLM.
+            llm_error: settings
+                .summarize
+                .then(|| Ollama::new(&settings.llm.base_url, &settings.llm.model).and_then(|llm| llm.check()).err())
+                .flatten()
                 .map(|e| format!("{e:#}")),
         }
     }

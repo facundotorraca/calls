@@ -1209,6 +1209,311 @@ code {
   background: var(--accent);
 }
 
+/* ── Settings window ────────────────────────────────────────────────── */
+
+.settings {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100vh;
+}
+
+.settings-nav {
+  padding: 6px 0;
+}
+
+.settings-page {
+  padding-bottom: 48px;
+}
+
+/* The command band: the page's name in Doto, its one live fact on the right. */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  padding-inline: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-title {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.page-status {
+  margin-left: auto;
+  color: var(--muted-foreground);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 760px;
+  padding: 24px;
+}
+
+.group {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.group-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 56px;
+  padding: 10px 12px;
+}
+
+.field + .field {
+  border-top: 1px solid var(--border);
+}
+
+.field.disabled .field-text {
+  opacity: 0.5;
+}
+
+.field-label {
+  font-weight: 500;
+}
+
+.field-hint {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+
+.hint-error {
+  color: var(--destructive);
+}
+
+.field-control {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+/* A state in words with a square beside it: green is fine, red needs you. */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.state-mark {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.state.ok {
+  color: var(--settled);
+}
+
+.state.ok .state-mark {
+  background: var(--settled);
+}
+
+.state.error {
+  color: var(--destructive);
+}
+
+.state.error .state-mark {
+  background: var(--destructive);
+}
+
+/* Square, like everything else: a knob that travels across a hairline track. */
+.switch {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--background);
+  transition:
+    background-color 160ms var(--ease-out-expo),
+    border-color 160ms linear;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--muted-foreground);
+  transition:
+    transform 200ms var(--ease-mech),
+    background-color 160ms linear;
+}
+
+.switch[aria-checked="true"] {
+  border-color: var(--foreground);
+  background: var(--foreground);
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  background: var(--background);
+  transform: translateX(16px);
+}
+
+.switch:disabled {
+  opacity: 0.4;
+}
+
+.select,
+.text-input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  outline: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+}
+
+.select:focus,
+.text-input:focus {
+  border-color: var(--foreground);
+}
+
+.select {
+  min-width: 160px;
+  padding-right: 28px;
+  appearance: none;
+  /* The disclosure chevron, drawn in the muted ink. */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    right 13px center,
+    right 9px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.text-input {
+  width: 240px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.text-input::placeholder {
+  color: var(--faint);
+}
+
+/* ── Models ── */
+
+.model-row {
+  display: grid;
+  /* Fixed action column, so a download's bar never pushes the sizes out of line. */
+  grid-template-columns: 1fr 72px 236px;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 8px 12px;
+}
+
+.model-row + .model-row {
+  border-top: 1px solid var(--border);
+}
+
+.model-row.in-use::before {
+  width: 2px;
+  background: var(--settled);
+  transform: none;
+}
+
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.model-detail {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+
+.model-error {
+  color: var(--destructive);
+  font-size: 12.5px;
+}
+
+.group-body > .model-error {
+  padding: 10px 12px 0;
+}
+
+.model-size {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.model-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.ghost-button.danger:hover {
+  color: var(--destructive);
+}
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.download .bar {
+  width: 80px;
+}
+
+.download-pct {
+  min-width: 36px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.model-pull {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.model-pull .text-input {
+  flex: 1;
+  width: auto;
+}
+
 /* ── Island window: transparent, only the strip is visible ──────────── */
 
 html.island-window,

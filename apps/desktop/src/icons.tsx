@@ -105,6 +105,32 @@ export const PencilIcon = (p: Props) => (
   </Icon>
 );
 
+export const SparklesIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M7 2.5l1.2 3.3 3.3 1.2-3.3 1.2L7 11.5 5.8 8.2 2.5 7l3.3-1.2z" />
+    <path d="M12.5 10.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" />
+  </Icon>
+);
+
+export const TextIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M2.5 4h11M2.5 8h11M2.5 12h7" />
+  </Icon>
+);
+
+export const SlidersIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M2.5 4.5h5M10.5 4.5h3M2.5 11.5h2M7.5 11.5h6" />
+    <path d="M7.5 3v3M10.5 3v3M4.5 10v3M7.5 10v3" />
+  </Icon>
+);
+
+export const ExternalIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M9 3.5h3.5V7M12.5 3.5L7.5 8.5" />
+  </Icon>
+);
+
 export const FinderIcon = (p: Props) => (
   <Icon {...p}>
     <path d="M9 3.5h3.5V7M12.5 3.5L7.5 8.5" />

@@ -2,6 +2,7 @@
 //! See workers/README.md for the protocol.
 
 use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -19,6 +20,7 @@ pub struct PythonWorker {
     name: String,
     uv: PathBuf,
     project: PathBuf,
+    env: Vec<(OsString, OsString)>,
 }
 
 impl PythonWorker {
@@ -28,7 +30,13 @@ impl PythonWorker {
             .map(|dir| dir.join(name))
             .filter(|dir| dir.join("main.py").is_file())
             .with_context(|| format!("worker {name} not found"))?;
-        Ok(PythonWorker { name: name.into(), uv, project })
+        Ok(PythonWorker { name: name.into(), uv, project, env: Vec::new() })
+    }
+
+    /// Sets an environment variable for the worker's process.
+    pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> PythonWorker {
+        self.env.push((key.into(), value.into()));
+        self
     }
 
     /// Sends `request` and returns the worker's result. The first run also creates the
@@ -40,7 +48,8 @@ impl PythonWorker {
             .arg("python")
             .arg(self.project.join("main.py"))
             // Outside the project: the app bundle is read only (and signed).
-            .env("UV_PROJECT_ENVIRONMENT", settings::data_dir().join("workers").join(&self.name));
+            .env("UV_PROJECT_ENVIRONMENT", settings::data_dir().join("workers").join(&self.name))
+            .envs(self.env.iter().map(|(k, v)| (k, v)));
 
         let mut result = None;
         let mut error = None;

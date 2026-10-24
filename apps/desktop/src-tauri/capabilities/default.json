@@ -14,7 +14,7 @@
     "opener:allow-reveal-item-in-dir",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://ollama.com/*" }]
+      "allow": [{ "url": "https://ollama.com/*" }, { "url": "https://huggingface.co/*" }]
     }
   ]
 }

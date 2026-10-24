@@ -4,15 +4,16 @@
 use std::path::PathBuf;
 
 use anyhow::bail;
+use calls_core::steps::{self, PLAYBACK_FILE};
 use calls_core::summary::Summary;
 use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};
-use calls_engines::Doctor;
 use calls_engines::models::{self, LocalModel, ModelKind};
 use calls_engines::ollama::{self, InstalledModel};
+use calls_engines::{Doctor, Ffmpeg, pyannote};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::downloads::{Running, Target};
+use crate::downloads::{self, Running, Target};
 use crate::recorder::Island;
 use crate::{AppState, show_main};
 
@@ -110,6 +111,23 @@ pub async fn delete_folder(state: State<'_, AppState>, name: String) -> CmdResul
     state.library.delete_folder(&name).map_err(to_string)
 }
 
+/// The file to play for a call. Calls processed before the player existed get theirs made
+/// now, which takes a few seconds.
+#[tauri::command]
+pub async fn playback(state: State<'_, AppState>, id: CallId) -> CmdResult<PathBuf> {
+    let library = state.library.clone();
+    blocking(move || {
+        let dir = library.dir(&id);
+        let path = dir.join(PLAYBACK_FILE);
+        if path.is_file() {
+            return Ok(path);
+        }
+        let call = library.load(&id)?;
+        steps::make_playback(&call, &dir, &Ffmpeg::locate()?, &|_| {})
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn doctor(state: State<'_, AppState>) -> CmdResult<Doctor> {
     let settings = state.settings();
@@ -179,11 +197,29 @@ pub async fn downloads(state: State<'_, AppState>) -> CmdResult<Vec<Running>> {
     Ok(state.downloads.running())
 }
 
-/// Starts a download in the background; progress arrives as `download` events.
+/// Starts a download in the background; progress arrives as `download` events. `token` is
+/// only for the diarization model.
 #[tauri::command]
-pub async fn start_download(app: AppHandle, state: State<'_, AppState>, target: Target) -> CmdResult<()> {
-    state.downloads.start(&app, target, state.settings().llm.base_url);
+pub async fn start_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    target: Target,
+    token: Option<String>,
+) -> CmdResult<()> {
+    let job = downloads::job(&target, state.settings().llm.base_url, token);
+    state.downloads.start(&app, target, job);
     Ok(())
+}
+
+/// Whether the diarization model is downloaded.
+#[tauri::command]
+pub async fn diarization_ready() -> CmdResult<bool> {
+    Ok(pyannote::is_downloaded())
+}
+
+#[tauri::command]
+pub async fn rename_speaker(state: State<'_, AppState>, id: CallId, from: String, to: String) -> CmdResult<()> {
+    state.library.rename_speaker(&id, &from, &to).map_err(to_string)
 }
 
 #[tauri::command]

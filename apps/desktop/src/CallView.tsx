@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type Call, type CallDetail, type Folder } from "./api";
+import { api, type Call, type CallDetail, type Folder, type Segment } from "./api";
 import type { ProgressMap } from "./CallList";
-import { formatDate, formatDuration, stepLabel } from "./format";
+import { formatDuration, stepLabel } from "./format";
 import { folderColor, FolderMark } from "./Folders";
 import { ChevronIcon, FinderIcon, PencilIcon } from "./icons";
+import { Player, type PlayerHandle } from "./Player";
 import { CopyButton, TabPanel, TabRail, type Tab } from "./Tabs";
 import { plural, summaryMeta, summaryText, SummaryView } from "./SummaryView";
-import { speakers, transcriptText, TranscriptView } from "./TranscriptView";
+import { segmentAt, speakers, transcriptText, TranscriptView } from "./TranscriptView";
 import { popupMenu, usePersistentState } from "./ui";
 
 interface Props {
   call: Call;
+  /** Diarization is on and its model downloaded: offer it for calls processed without it. */
+  canDiarize: boolean;
   progress?: ProgressMap[string];
   folders: Folder[];
   /** Switch the title to editing ("Renombrar" in the sidebar), then call `onRenameStarted`. */
@@ -21,17 +24,27 @@ interface Props {
   onError: (error: unknown) => void;
 }
 
-export function CallView({ call, progress, folders, renameRequested, onRenameStarted, onChanged, onError }: Props) {
+export function CallView({
+  call,
+  canDiarize,
+  progress,
+  folders,
+  renameRequested,
+  onRenameStarted,
+  onChanged,
+  onError,
+}: Props) {
   const [detail, setDetail] = useState<CallDetail | null>(null);
+  const [edits, setEdits] = useState(0);
 
-  // Reload when switching calls or when processing moves it to a new state.
+  // Reload when switching calls, when processing moves it to a new state, or after an edit.
   useEffect(() => {
     let cancelled = false;
     api.getCall(call.id).then((d) => !cancelled && setDetail(d));
     return () => {
       cancelled = true;
     };
-  }, [call.id, call.status.state]);
+  }, [call.id, call.status.state, edits]);
 
   const current = detail?.call.id === call.id ? detail : null;
   const transcript = current?.transcript ?? null;
@@ -40,6 +53,25 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
   const summarizing = state === "processing" && call.status.step === "summarize";
   // The open tab is remembered across calls: reading summaries one after another stays on summaries.
   const [tabId, setTabId] = usePersistentState("call.tab", "summary");
+
+  // The player reports its position every frame; only a change of segment re-renders.
+  const player = useRef<PlayerHandle>(null);
+  const [playing, setPlaying] = useState<Segment | null>(null);
+  const onTime = useCallback(
+    (ms: number) => setPlaying(transcript ? segmentAt(transcript.segments, ms) : null),
+    [transcript],
+  );
+  const seek = useCallback((ms: number) => player.current?.seek(ms), []);
+
+  const renameSpeaker = useCallback(
+    (from: string, to: string) =>
+      api.renameSpeaker(call.id, from, to).then(
+        () => setEdits((n) => n + 1),
+        (e) => onError(e),
+      ),
+    [call.id, onError],
+  );
+  const diarizable = canDiarize && state === "ready" && !("diarize" in call.completed_steps);
 
   const tabs: Tab[] = [];
   if (transcript && (summary || summarizing || state === "ready")) {
@@ -74,8 +106,19 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
       meta: [last && formatDuration(last.end_ms), people > 1 && plural(people, "hablante", "hablantes")]
         .filter(Boolean)
         .join(" · "),
-      actions: <CopyButton text={() => transcriptText(transcript)} />,
-      content: <TranscriptView transcript={transcript} />,
+      actions: (
+        <>
+          {diarizable && (
+            <button className="ghost-button tech-label" onClick={() => api.processCall(call.id).then(onChanged)}>
+              separar hablantes
+            </button>
+          )}
+          <CopyButton text={() => transcriptText(transcript)} />
+        </>
+      ),
+      content: (
+        <TranscriptView transcript={transcript} active={playing} onSeek={seek} onRenameSpeaker={renameSpeaker} />
+      ),
     });
   }
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0];
@@ -108,17 +151,23 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
   return (
     <article className="call-view">
       <header className="call-header dot-grid">
-        <div className="call-rail tech-label">
-          <button className="folder-chip tech-label" onClick={folderMenu} title="Mover a otra carpeta">
+        <div className="call-rail">
+          <button
+            className="folder-chip tech-label"
+            data-color={folderColor(folders, call.folder)}
+            onClick={folderMenu}
+            title="Mover a otra carpeta"
+          >
             <FolderMark color={folderColor(folders, call.folder)} />
             {call.folder ?? "sin carpeta"}
             <ChevronIcon className="folder-chip-chevron" />
           </button>
-          <span className="call-rail-meta">
-            {formatDate(call.created_at)}
-            {call.duration_ms != null && ` · ${formatDuration(call.duration_ms)}`}
-            {transcript?.language && ` · ${transcript.language}`}
-          </span>
+          {current && (
+            <button className="ghost-button tech-label" onClick={() => revealItemInDir(current.dir)}>
+              <FinderIcon />
+              finder
+            </button>
+          )}
         </div>
         <div className="call-title-row">
           <EditableTitle
@@ -128,13 +177,16 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
             onEditStarted={onRenameStarted}
             onSave={rename}
           />
-          {current && (
-            <button className="ghost-button tech-label" onClick={() => revealItemInDir(current.dir)}>
-              <FinderIcon />
-              finder
-            </button>
-          )}
         </div>
+        <dl className="readouts">
+          <Readout label="fecha" value={dayFormat.format(new Date(call.created_at)).replace(",", "")} />
+          <Readout label="hora" value={timeFormat.format(new Date(call.created_at))} />
+          {call.duration_ms != null && <Readout label="duración" value={formatDuration(call.duration_ms)} />}
+          {transcript?.language && <Readout label="idioma" value={languageName(transcript.language)} />}
+          {transcript && speakers(transcript).length > 1 && (
+            <Readout label="hablantes" value={String(speakers(transcript).length)} />
+          )}
+        </dl>
       </header>
 
       {activeTab && <TabRail tabs={tabs} active={activeTab} onSelect={setTabId} />}
@@ -178,7 +230,29 @@ export function CallView({ call, progress, folders, renameRequested, onRenameSta
 
         {activeTab && <TabPanel tab={activeTab} />}
       </div>
+
+      {state !== "recording" && <Player key={call.id} ref={player} callId={call.id} onTime={onTime} />}
     </article>
+  );
+}
+
+const dayFormat = new Intl.DateTimeFormat("es-AR", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+const timeFormat = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const languages = new Intl.DisplayNames(["es"], { type: "language" });
+const languageName = (code: string) => (languages.of(code) ?? code).toLowerCase();
+
+/** One fact about the call: a quiet label over its value. */
+function Readout({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="readout">
+      <dt className="tech-label">{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }
 

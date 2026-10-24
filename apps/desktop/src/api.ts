@@ -86,6 +86,8 @@ export interface Doctor {
   library_dir: string;
   uv: string | null;
   llm_error: string | null;
+  /** Voices get told apart: turned on and the model downloaded. */
+  diarization: boolean;
 }
 
 /** Mirrors `Settings` in crates/core/src/settings.rs. Sent back whole when saving. */
@@ -94,6 +96,10 @@ export interface Settings {
   /** ISO 639-1 code, or `auto`. */
   language: string;
   whisper_model: string;
+  /** Names and terms, spelled right, that steer the transcriber and the summary. */
+  vocabulary: string[];
+  /** Tell the voices of a call apart (pyannote, downloaded once). */
+  diarize: boolean;
   vad_model: string | null;
   detect_calls: boolean;
   auto_record: boolean;
@@ -120,7 +126,7 @@ export interface OllamaModel {
 }
 
 export interface DownloadTarget {
-  kind: "whisper" | "vad" | "ollama";
+  kind: "whisper" | "vad" | "ollama" | "diarization";
   name: string;
 }
 
@@ -168,8 +174,14 @@ export const api = {
   ollamaModels: () => invoke<OllamaModel[]>("ollama_models"),
   deleteOllamaModel: (name: string) => invoke<void>("delete_ollama_model", { name }),
   downloads: () => invoke<(DownloadTarget & { fraction: number })[]>("downloads"),
-  startDownload: (target: DownloadTarget) => invoke<void>("start_download", { target }),
+  /** `token` only for the diarization model: a Hugging Face token, used once and not stored. */
+  startDownload: (target: DownloadTarget, token?: string) => invoke<void>("start_download", { target, token }),
   cancelDownload: (target: DownloadTarget) => invoke<void>("cancel_download", { target }),
+  /** The call's audio for the player; made on the spot for calls that do not have it yet. */
+  playback: (id: CallId) => invoke<string>("playback", { id }),
+  diarizationReady: () => invoke<boolean>("diarization_ready"),
+  /** Renames a speaker throughout the call's transcript. */
+  renameSpeaker: (id: CallId, from: string, to: string) => invoke<void>("rename_speaker", { id, from, to }),
 };
 
 /** What the island shows; mirrors `Island` in src-tauri/src/recorder.rs. */
@@ -206,6 +218,9 @@ export const STEP_LABELS: Record<string, string> = {
   extract_audio: "Extrayendo audio",
   transcribe: "Transcribiendo",
   render_markdown: "Generando documento",
+  playback: "Preparando el audio",
+  diarize: "Separando hablantes",
+  name_speakers: "Identificando hablantes",
   summarize: "Resumiendo",
 };
 

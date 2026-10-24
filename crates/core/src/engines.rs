@@ -14,19 +14,45 @@ pub struct AudioInfo {
     pub duration_ms: Option<u64>,
 }
 
+/// One input of a mix: a file, and when it starts relative to the call.
+pub struct MixInput<'a> {
+    pub file: &'a Path,
+    pub offset_ms: u64,
+}
+
 pub trait AudioExtractor: Send + Sync {
     /// Decodes any audio or video file into 16 kHz mono PCM WAV, the format speech models expect.
     fn extract(&self, input: &Path, output: &Path, progress: Progress) -> Result<AudioInfo>;
+
+    /// Mixes the inputs, each delayed by its offset, into one compressed file for listening
+    /// (AAC in `.m4a`).
+    fn mix(&self, inputs: &[MixInput], output: &Path, progress: Progress) -> Result<()>;
 }
 
 pub struct TranscribeRequest<'a> {
     pub audio: &'a Path,
     /// ISO 639-1 code, or `auto` to let the model detect it.
     pub language: &'a str,
+    /// Text that steers the spelling of names and terms (see `Settings::vocabulary_prompt`).
+    pub prompt: Option<&'a str>,
 }
 
 pub trait Transcriber: Send + Sync {
     fn transcribe(&self, request: &TranscribeRequest, progress: Progress) -> Result<Transcript>;
+}
+
+/// A stretch of audio and who was speaking in it, as a diarizer labels them (`SPEAKER_00`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SpeakerTurn {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub speaker: String,
+}
+
+/// Tells voices apart: who spoke when, without knowing who they are.
+pub trait Diarizer: Send + Sync {
+    /// Takes a 16 kHz mono WAV, like the transcriber.
+    fn diarize(&self, audio: &Path, progress: Progress) -> Result<Vec<SpeakerTurn>>;
 }
 
 /// A language model, local or remote.

@@ -312,6 +312,22 @@ impl Library {
         Ok(Some(serde_json::from_str(&fs::read_to_string(path)?)?))
     }
 
+    /// Renames a speaker throughout a call's transcript ("Hablante 2" -> "María").
+    pub fn rename_speaker(&self, id: &CallId, from: &str, to: &str) -> Result<()> {
+        let to = to.trim();
+        if to.is_empty() {
+            bail!("the name can not be empty");
+        }
+        let _guard = self.lock();
+        let call = self.load(id)?;
+        let mut transcript = self.transcript(id)?.context("the call has no transcript")?;
+        if from != to && crate::steps::speakers(&transcript).iter().any(|s| s == to) {
+            bail!("there is already a speaker named {to}");
+        }
+        crate::steps::rename_speaker(&mut transcript, from, to);
+        crate::steps::save_transcript(&self.dir(id), &call.title, &transcript)
+    }
+
     fn unique_id(&self, base: &str) -> CallId {
         let mut id = base.to_string();
         let mut n = 2;

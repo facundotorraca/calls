@@ -9,6 +9,7 @@ import {
   onPipelineEvent,
   onSelectCall,
   onSettingsChanged,
+  onDownload,
   MEDIA_EXTENSIONS,
   type Call,
   type CallId,
@@ -114,6 +115,7 @@ export function App() {
       onSelectCall((id) => refresh().then(() => setSelected(id))),
       // A model chosen or downloaded in the settings may fix (or break) the setup.
       onSettingsChanged(() => api.doctor().then(setDoctor)),
+      onDownload((e) => e.state === "done" && api.doctor().then(setDoctor)),
     ];
     return () => unlisteners.forEach((u) => void u.then((fn) => fn()));
   }, [refresh]);
@@ -223,13 +225,10 @@ export function App() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             />
+            <button className="search-action" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
+              <SortIcon />
+            </button>
           </label>
-          <button className="icon-button" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
-            <SortIcon />
-          </button>
-          <button className="icon-button" onClick={() => api.openSettings()} title="Ajustes (⌘,)">
-            <SlidersIcon />
-          </button>
         </div>
 
         <div className="sidebar-scroll">
@@ -280,6 +279,7 @@ export function App() {
         {current ? (
           <CallView
             call={current}
+            canDiarize={doctor?.diarization ?? false}
             progress={progress[current.id]}
             folders={folders}
             renameRequested={renaming === current.id}
@@ -300,7 +300,10 @@ export function App() {
       </main>
 
       <footer className="statusbar tech-label">
-        <span>calls — transcripción local</span>
+        <button className="statusbar-button" onClick={() => api.openSettings()} title="Ajustes">
+          <SlidersIcon />
+          ajustes <kbd>⌘,</kbd>
+        </button>
         <span className="statusbar-state">
           {recording ? (
             <>

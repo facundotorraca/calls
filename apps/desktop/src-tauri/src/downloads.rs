@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use calls_engines::models::{self, ModelKind};
-use calls_engines::ollama;
+use calls_engines::{ollama, pyannote};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -24,6 +24,8 @@ pub enum Kind {
     Vad,
     /// A model pulled into Ollama.
     Ollama,
+    /// The speaker diarization model (pyannote).
+    Diarization,
 }
 
 /// What is being downloaded.
@@ -58,6 +60,26 @@ pub struct Running {
     fraction: f32,
 }
 
+/// The download itself: reports progress, and stops early when cancelled if it can.
+pub type Job = Box<dyn FnOnce(&dyn Fn(f32), &AtomicBool) -> anyhow::Result<()> + Send>;
+
+/// The job that downloads `target`. `ollama_url` is where Ollama listens; `token` unlocks
+/// the diarization model on Hugging Face (used for that download only, never stored).
+pub fn job(target: &Target, ollama_url: String, token: Option<String>) -> Job {
+    let name = target.name.clone();
+    match target.kind {
+        Kind::Whisper => {
+            Box::new(move |progress, cancel| models::download(ModelKind::Whisper, &name, progress, cancel))
+        }
+        Kind::Vad => Box::new(move |progress, cancel| models::download(ModelKind::Vad, &name, progress, cancel)),
+        Kind::Ollama => Box::new(move |progress, cancel| ollama::pull(&ollama_url, &name, progress, cancel)),
+        Kind::Diarization => Box::new(move |progress, _| match token {
+            Some(token) => pyannote::download(&token, progress),
+            None => anyhow::bail!("a Hugging Face token is needed to download the model"),
+        }),
+    }
+}
+
 struct Active {
     fraction: f32,
     cancel: Arc<AtomicBool>,
@@ -73,8 +95,9 @@ impl Downloads {
         self.lock().iter().map(|(target, a)| Running { target: target.clone(), fraction: a.fraction }).collect()
     }
 
-    /// Starts downloading `target` on its own thread. Starting one already running does nothing.
-    pub fn start(&self, app: &AppHandle, target: Target, ollama_url: String) {
+    /// Runs `job` (the download of `target`) on its own thread, reporting its progress.
+    /// Starting one already running does nothing.
+    pub fn start(&self, app: &AppHandle, target: Target, job: Job) {
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut active = self.lock();
@@ -93,11 +116,7 @@ impl Downloads {
                 }
                 emit(&app, &target, Update::Progress { fraction });
             };
-            let result = match target.kind {
-                Kind::Whisper => models::download(ModelKind::Whisper, &target.name, &progress, &cancel),
-                Kind::Vad => models::download(ModelKind::Vad, &target.name, &progress, &cancel),
-                Kind::Ollama => ollama::pull(&ollama_url, &target.name, &progress, &cancel),
-            };
+            let result = job(&progress, &cancel);
             if let Some(st) = app.try_state::<AppState>() {
                 st.downloads.lock().remove(&target);
             }

@@ -7,6 +7,7 @@ mod ffmpeg;
 pub mod models;
 pub mod ollama;
 mod process;
+pub mod pyannote;
 pub mod python;
 pub mod sidecar;
 mod whisper;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use calls_core::Pipeline;
 use calls_core::Settings;
-use calls_core::steps::{ExtractAudio, RenderMarkdown, Summarize, Transcribe};
+use calls_core::steps::{Diarize, ExtractAudio, MixPlayback, NameSpeakers, RenderMarkdown, Summarize, Transcribe};
 use serde::Serialize;
 
 pub use ffmpeg::Ffmpeg;
@@ -29,14 +30,34 @@ pub fn default_pipeline(settings: &Settings) -> Result<Pipeline> {
     let ffmpeg = Ffmpeg::locate()?;
     let whisper = WhisperCli::locate(settings.whisper_model_path(), settings.vad_model_path())?;
 
-    let mut pipeline = Pipeline::new()
-        .with(ExtractAudio { extractor: Box::new(ffmpeg) })
-        .with(Transcribe { transcriber: Box::new(whisper), language: settings.language.clone() })
-        .with(RenderMarkdown);
+    let mut pipeline = Pipeline::new().with(ExtractAudio { extractor: Box::new(ffmpeg.clone()) }).with(Transcribe {
+        transcriber: Box::new(whisper),
+        language: settings.language.clone(),
+        prompt: settings.vocabulary_prompt(),
+    });
+    // Off, or the model not downloaded yet: transcripts still work, just without voices.
+    let diarize = settings.diarize && pyannote::is_downloaded();
+    if diarize {
+        pipeline = pipeline.with(Diarize { diarizer: Box::new(pyannote::Pyannote::locate()?) });
+    }
+    pipeline = pipeline
+        .with(RenderMarkdown)
+        // Quick, and before the LLM: the call can be listened to while it thinks.
+        .with(MixPlayback { mixer: Box::new(ffmpeg) });
+
     // Last: the transcript is already usable if the LLM is not available.
     if settings.summarize {
-        let llm = Ollama::new(&settings.llm.base_url, &settings.llm.model)?;
-        pipeline = pipeline.with(Summarize { llm: Box::new(llm), language: settings.summary_language.clone() });
+        let llm = || Ollama::new(&settings.llm.base_url, &settings.llm.model);
+        // Names first, so the summary can say who said what.
+        if diarize {
+            pipeline = pipeline.with(NameSpeakers { llm: Box::new(llm()?) });
+        }
+        let vocabulary = settings.vocabulary.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).map(Into::into);
+        pipeline = pipeline.with(Summarize {
+            llm: Box::new(llm()?),
+            language: settings.summary_language.clone(),
+            vocabulary: vocabulary.collect(),
+        });
     }
     Ok(pipeline)
 }
@@ -56,6 +77,8 @@ pub struct Doctor {
     pub uv: Option<PathBuf>,
     /// Why the LLM is not usable, if it is not (Ollama closed, model missing).
     pub llm_error: Option<String>,
+    /// Voices get told apart: turned on and the model downloaded.
+    pub diarization: bool,
 }
 
 impl Doctor {
@@ -76,6 +99,7 @@ impl Doctor {
                 .then(|| Ollama::new(&settings.llm.base_url, &settings.llm.model).and_then(|llm| llm.check()).err())
                 .flatten()
                 .map(|e| format!("{e:#}")),
+            diarization: settings.diarize && pyannote::is_downloaded(),
         }
     }
 

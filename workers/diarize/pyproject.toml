@@ -1,0 +1,8 @@
+[project]
+name = "calls-worker-diarize"
+version = "0.1.0"
+description = "Speaker diarization (who spoke when) with pyannote, run locally"
+requires-python = ">=3.12"
+dependencies = [
+    "pyannote.audio>=4.0.7",
+]

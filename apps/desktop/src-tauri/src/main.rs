@@ -52,6 +52,8 @@ fn main() {
         .setup(|app| {
             let loaded = Settings::load_or_default(&settings::settings_path())?;
             let library = Library::open(&loaded.library_dir)?;
+            // The player reads the calls' audio straight from the library, and nothing else.
+            app.asset_protocol_scope().allow_directory(&loaded.library_dir, true)?;
             let recorder = Recorder::spawn(app.handle(), &loaded);
             let settings = Arc::new(RwLock::new(loaded));
             let queue = spawn_queue(app.handle().clone(), library.clone(), settings.clone());
@@ -99,6 +101,9 @@ fn main() {
             commands::downloads,
             commands::start_download,
             commands::cancel_download,
+            commands::playback,
+            commands::diarization_ready,
+            commands::rename_speaker,
             commands::doctor,
             commands::island_state,
             commands::start_recording,

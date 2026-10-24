@@ -41,6 +41,10 @@ impl Transcriber for WhisperCli {
             .args(["--language", request.language])
             .args(["--output-json", "--print-progress", "--output-file"])
             .arg(&prefix);
+        if let Some(prompt) = request.prompt {
+            // Carried into every 30 s window; on its own the prompt only shapes the first.
+            cmd.arg("--prompt").arg(prompt).arg("--carry-initial-prompt");
+        }
         if let Some(vad) = &self.vad_model {
             cmd.arg("--vad").arg("--vad-model").arg(vad);
         }

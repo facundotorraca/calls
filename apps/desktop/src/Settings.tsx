@@ -111,7 +111,7 @@ interface Downloads {
   errors: Record<string, string>;
   /** Bumped when a download finishes, to reload the lists. */
   finished: number;
-  start: (target: DownloadTarget) => void;
+  start: (target: DownloadTarget, token?: string) => void;
   cancel: (target: DownloadTarget) => void;
 }
 
@@ -136,11 +136,11 @@ function useDownloads(): Downloads {
     return () => void unlisten.then((fn) => fn());
   }, []);
 
-  const start = useCallback((target: DownloadTarget) => {
+  const start = useCallback((target: DownloadTarget, token?: string) => {
     const k = key(target);
     setErrors(({ [k]: _, ...rest }) => rest);
     setProgress((p) => ({ ...p, [k]: 0 }));
-    api.startDownload(target);
+    api.startDownload(target, token);
   }, []);
 
   return { progress, errors, finished, start, cancel: api.cancelDownload };
@@ -203,9 +203,12 @@ function TranscriptionPage({
   const [vadModels, setVadModels] = useState<LocalModel[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const [diarizationReady, setDiarizationReady] = useState<boolean | null>(null);
+
   const reload = useCallback(() => {
     api.localModels("whisper").then(setModels);
     api.localModels("vad").then(setVadModels);
+    api.diarizationReady().then(setDiarizationReady);
   }, []);
   useEffect(reload, [reload, downloads.finished]);
 
@@ -235,6 +238,19 @@ function TranscriptionPage({
         </Field>
       </Group>
 
+      <Group
+        label="vocabulario"
+        meta={settings.vocabulary.length > 0 ? `${settings.vocabulary.length} términos` : undefined}
+      >
+        <div className="vocabulary">
+          <p className="field-hint">
+            Nombres de personas, clientes, productos y siglas que Whisper escribe mal, tal como se escriben. Uno por
+            línea. Se usa en las próximas transcripciones y en los resúmenes.
+          </p>
+          <TermsInput value={settings.vocabulary} onCommit={(vocabulary) => save({ vocabulary })} />
+        </div>
+      </Group>
+
       <Group label="modelo" meta="whisper.cpp · local">
         {error && <p className="model-error">{error}</p>}
         {models.map((model) => {
@@ -258,6 +274,17 @@ function TranscriptionPage({
         })}
       </Group>
 
+      <Group label="hablantes" meta="pyannote · local">
+        <Field
+          label="Separar hablantes"
+          hint="Distingue cada voz: en las grabaciones importadas, a todos; en las grabadas, a los del otro lado (vos ya sos «Yo»). Con el resumen activo, la IA les pone nombre cuando la llamada lo dice."
+        >
+          {diarizationReady && <State tone="ok">listo</State>}
+          <Switch checked={settings.diarize} onChange={(diarize) => save({ diarize })} />
+        </Field>
+        {settings.diarize && diarizationReady === false && <DiarizationSetup downloads={downloads} />}
+      </Group>
+
       <Group label="silencios">
         <Field label="Saltear silencios" hint="Detecta las partes sin voz para que Whisper no invente texto en ellas.">
           {vadTarget && settings.vad_model && !vad.downloaded ? (
@@ -275,6 +302,74 @@ function TranscriptionPage({
         </Field>
       </Group>
     </SettingsPage>
+  );
+}
+
+const DIARIZATION_MODEL = "https://huggingface.co/pyannote/speaker-diarization-community-1";
+const DIARIZATION_TARGET = { kind: "diarization", name: "community-1" } as const;
+
+/** The one time setup of the diarization model, which Hugging Face gates behind accepting
+ * its conditions (free) and a token. */
+function DiarizationSetup({ downloads }: { downloads: Downloads }) {
+  const [token, setToken] = useState("");
+  const progress = downloads.progress[key(DIARIZATION_TARGET)];
+  const error = downloads.errors[key(DIARIZATION_TARGET)];
+
+  return (
+    <div className="setup">
+      <p className="field-hint">
+        El modelo es gratis, pero Hugging Face pide una cuenta para descargarlo. Una sola vez:
+      </p>
+      <ol className="setup-steps">
+        <li>
+          <span>Aceptá las condiciones del modelo.</span>
+          <button className="ghost-button tech-label" onClick={() => openUrl(DIARIZATION_MODEL)}>
+            <ExternalIcon />
+            abrir
+          </button>
+        </li>
+        <li>
+          <span>Creá un token de lectura (Read).</span>
+          <button className="ghost-button tech-label" onClick={() => openUrl("https://huggingface.co/settings/tokens")}>
+            <ExternalIcon />
+            abrir
+          </button>
+        </li>
+        <li>
+          <span>Pegalo acá y descargá.</span>
+        </li>
+      </ol>
+      <form
+        className="model-pull"
+        onSubmit={(e) => {
+          e.preventDefault();
+          downloads.start(DIARIZATION_TARGET, token.trim());
+          setToken("");
+        }}
+      >
+        <input
+          className="text-input"
+          type="password"
+          placeholder="hf_…"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          disabled={progress != null}
+          spellCheck={false}
+        />
+        {progress != null ? (
+          <DownloadControl progress={progress} />
+        ) : (
+          <button className="button" type="submit" disabled={!token.trim()}>
+            descargar
+          </button>
+        )}
+      </form>
+      {error && <p className="model-error">{error}</p>}
+      <p className="field-hint">
+        El token se usa solo para esta descarga y no se guarda. La primera vez también se instala PyTorch (~1 GB): tarda
+        unos minutos.
+      </p>
+    </div>
   );
 }
 
@@ -559,6 +654,32 @@ function TextInput({ value, onCommit }: { value: string; onCommit: (value: strin
         if (e.key === "Enter") commit();
         if (e.key === "Escape") setDraft(value);
       }}
+    />
+  );
+}
+
+/** One term per line (commas also split). Saves when leaving the field. */
+function TermsInput({ value, onCommit }: { value: string[]; onCommit: (terms: string[]) => void }) {
+  const [draft, setDraft] = useState(value.join("\n"));
+  useEffect(() => setDraft(value.join("\n")), [value]);
+  const commit = () => {
+    const seen = new Set<string>();
+    const terms = draft
+      .split(/[\n,]/)
+      .map((t) => t.trim())
+      .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+    if (terms.join("\n") !== value.join("\n")) onCommit(terms);
+    else setDraft(value.join("\n"));
+  };
+  return (
+    <textarea
+      className="text-input terms"
+      value={draft}
+      rows={Math.min(10, Math.max(4, draft.split("\n").length + 1))}
+      placeholder={"Faku\nAcme\nKubernetes"}
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
     />
   );
 }

@@ -17,6 +17,11 @@ pub struct Settings {
     pub language: String,
     /// whisper.cpp model name, resolved to `<models dir>/ggml-<name>.bin`.
     pub whisper_model: String,
+    /// Names and terms the transcriber tends to get wrong (people, clients, products,
+    /// acronyms), spelled the way they should be written.
+    pub vocabulary: Vec<String>,
+    /// Tell the voices of a call apart (needs the pyannote model, downloaded once).
+    pub diarize: bool,
     /// Voice activity detection model, used to skip silences (avoids made up text in them).
     /// Ignored if the file is not present.
     pub vad_model: Option<String>,
@@ -53,6 +58,8 @@ impl Default for Settings {
             library_dir: home_dir().join("Calls"),
             language: "auto".into(),
             whisper_model: "large-v3-turbo".into(),
+            vocabulary: Vec::new(),
+            diarize: true,
             vad_model: Some("silero-v6.2.0".into()),
             detect_calls: true,
             auto_record: false,
@@ -65,6 +72,31 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The vocabulary as a prompt for the transcriber, if there is one. Whisper reads the
+    /// prompt as text said just before, which nudges it towards these spellings.
+    ///
+    /// A sentence, not a bare list: tried on a real call, a bare list made whisper skip the
+    /// first seconds of speech, while a sentence kept them and fixed the names.
+    pub fn vocabulary_prompt(&self) -> Option<String> {
+        let terms: Vec<&str> = self.vocabulary.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+        if terms.is_empty() {
+            return None;
+        }
+        let mut prompt = String::from(if self.language == "es" { "En esta llamada: " } else { "In this call: " });
+        // Whisper keeps at most half its context (~220 tokens) of prompt; stay well under.
+        for (i, term) in terms.iter().enumerate() {
+            if prompt.len() + term.len() > 600 {
+                break;
+            }
+            if i > 0 {
+                prompt.push_str(", ");
+            }
+            prompt.push_str(term);
+        }
+        prompt.push('.');
+        Some(prompt)
+    }
+
     pub fn load_or_default(path: &Path) -> Result<Settings> {
         match fs::read_to_string(path) {
             Ok(json) => serde_json::from_str(&json).with_context(|| format!("invalid settings in {}", path.display())),
@@ -110,4 +142,21 @@ pub fn settings_path() -> PathBuf {
 
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vocabulary_prompt() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.vocabulary_prompt(), None);
+        settings.vocabulary = vec![" Acme ".into(), "".into(), "Kubernetes".into(), "Srinika".into()];
+        assert_eq!(settings.vocabulary_prompt().as_deref(), Some("In this call: Acme, Kubernetes, Srinika."));
+        settings.language = "es".into();
+        assert_eq!(settings.vocabulary_prompt().as_deref(), Some("En esta llamada: Acme, Kubernetes, Srinika."));
+        settings.vocabulary = vec!["x".repeat(400); 3];
+        assert_eq!(settings.vocabulary_prompt().unwrap(), format!("En esta llamada: {}.", "x".repeat(400)));
+    }
 }

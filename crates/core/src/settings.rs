@@ -26,6 +26,25 @@ pub struct Settings {
     pub auto_record: bool,
     /// Apps whose microphone use counts as a call.
     pub call_apps: Vec<CallApp>,
+    /// Summary, decisions and action items with an LLM after transcribing.
+    pub summarize: bool,
+    /// Language summaries are written in, whatever the call's language.
+    pub summary_language: String,
+    pub llm: LlmSettings,
+}
+
+/// A local LLM served by Ollama.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmSettings {
+    pub base_url: String,
+    pub model: String,
+}
+
+impl Default for LlmSettings {
+    fn default() -> Self {
+        LlmSettings { base_url: "http://localhost:11434".into(), model: "qwen3.5:35b".into() }
+    }
 }
 
 impl Default for Settings {
@@ -38,6 +57,9 @@ impl Default for Settings {
             detect_calls: true,
             auto_record: false,
             call_apps: CallApp::defaults(),
+            summarize: true,
+            summary_language: "español".into(),
+            llm: LlmSettings::default(),
         }
     }
 }

@@ -45,7 +45,7 @@ impl Transcriber for WhisperCli {
             cmd.arg("--vad").arg("--vad-model").arg(vad);
         }
 
-        run_lines(cmd, Stream::Stderr, |line| {
+        run_lines(cmd, None, Stream::Stderr, |line| {
             // e.g. "whisper_print_progress_callback: progress =  35%"
             if let Some((_, pct)) = line.split_once("progress =")
                 && let Ok(pct) = pct.trim().trim_end_matches('%').parse::<f32>()

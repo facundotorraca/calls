@@ -193,16 +193,15 @@ impl Recorder {
 
     fn on_stopped(&self, app: &AppHandle, st: &AppState, files: Vec<String>, offsets_ms: HashMap<String, u64>) {
         let Some(recording) = self.lock().recording.take() else { return };
-        let queued = st.library.load(&recording.call_id).and_then(|mut call| {
+        let queued = st.library.update(&recording.call_id, |call| {
             call.tracks.retain(|t| files.contains(&t.file));
             for track in &mut call.tracks {
                 track.offset_ms = offsets_ms.get(&track.file).copied().unwrap_or(0);
             }
             call.status = Status::Pending;
-            st.library.save(&call)
         });
         match queued {
-            Ok(()) => st.queue.push(recording.call_id),
+            Ok(_) => st.queue.push(recording.call_id),
             Err(e) => eprintln!("{}: {e:#}", recording.call_id),
         }
         let _ = app.emit(LIBRARY_EVENT, ());

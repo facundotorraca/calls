@@ -21,6 +21,7 @@ export interface Track {
 export interface Call {
   id: CallId;
   title: string;
+  folder?: string;
   created_at: string;
   source: string | null;
   duration_ms: number | null;
@@ -41,10 +42,23 @@ export interface Transcript {
   segments: Segment[];
 }
 
+export interface ActionItem {
+  task: string;
+  owner: string | null;
+  due: string | null;
+}
+
+export interface Summary {
+  summary: string;
+  decisions: string[];
+  action_items: ActionItem[];
+}
+
 export interface CallDetail {
   call: Call;
   dir: string;
   transcript: Transcript | null;
+  summary: Summary | null;
 }
 
 export interface Doctor {
@@ -55,6 +69,8 @@ export interface Doctor {
   whisper_model_present: boolean;
   vad_model_present: boolean;
   library_dir: string;
+  uv: string | null;
+  llm_error: string | null;
 }
 
 export type PipelineEvent =
@@ -69,6 +85,13 @@ export const api = {
   getCall: (id: CallId) => invoke<CallDetail>("get_call", { id }),
   importFiles: (paths: string[]) => invoke<Call[]>("import_files", { paths }),
   processCall: (id: CallId) => invoke<void>("process_call", { id }),
+  renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
+  /** `null` takes the call out of any folder; a new name creates the folder. */
+  moveCall: (id: CallId, folder: string | null) => invoke<Call>("move_call", { id, folder }),
+  listFolders: () => invoke<string[]>("list_folders"),
+  createFolder: (name: string) => invoke<string>("create_folder", { name }),
+  renameFolder: (from: string, to: string) => invoke<void>("rename_folder", { from, to }),
+  deleteFolder: (name: string) => invoke<void>("delete_folder", { name }),
   doctor: () => invoke<Doctor>("doctor"),
   islandState: () => invoke<Island>("island_state"),
   startRecording: () => invoke<CallId>("start_recording"),
@@ -106,6 +129,7 @@ export const STEP_LABELS: Record<string, string> = {
   extract_audio: "Extrayendo audio",
   transcribe: "Transcribiendo",
   render_markdown: "Generando documento",
+  summarize: "Resumiendo",
 };
 
 export const MEDIA_EXTENSIONS = ["mp4", "mkv", "mov", "webm", "m4a", "mp3", "wav", "aac", "flac", "ogg"];

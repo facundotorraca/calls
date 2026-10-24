@@ -1,0 +1,6 @@
+[project]
+name = "calls-worker-template"
+version = "0.1.0"
+description = "Template for Python sidecar workers, copy it to create a new one"
+requires-python = ">=3.12"
+dependencies = []

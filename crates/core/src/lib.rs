@@ -12,6 +12,7 @@ pub mod pipeline;
 pub mod queue;
 pub mod settings;
 pub mod steps;
+pub mod summary;
 pub mod transcript;
 
 pub use call::{Call, CallId, Status, Track, TrackRole};

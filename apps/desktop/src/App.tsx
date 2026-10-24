@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   api,
   onIsland,
@@ -13,37 +14,73 @@ import {
   type Doctor,
   type Island,
 } from "./api";
-import { CallList, type ProgressMap } from "./CallList";
+import { CallList, SORT_LABELS, sortCalls, type ProgressMap, type Sort } from "./CallList";
 import { CallView } from "./CallView";
+import { useCallDrag } from "./drag";
+import { Folders, inScope, type Scope } from "./Folders";
+import { SearchIcon, SortIcon } from "./icons";
 import { SetupBanner } from "./SetupBanner";
+import { normalize, popupMenu, usePersistentState } from "./ui";
 
 export function App() {
   const [calls, setCalls] = useState<Call[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [selected, setSelected] = useState<CallId | null>(null);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [island, setIsland] = useState<Island>({ kind: "hidden" });
+  const [scope, setScope] = usePersistentState<Scope>("sidebar.scope", { kind: "all" });
+  const [sort, setSort] = usePersistentState<Sort>("sidebar.sort", "newest");
+  const [query, setQuery] = useState("");
+  const [renaming, setRenaming] = useState<CallId | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const showError = useCallback((e: unknown) => setError(String(e)), []);
 
   const refresh = useCallback(async () => {
-    const list = await api.listCalls();
+    const [list, folderList] = await Promise.all([api.listCalls(), api.listFolders()]);
     setCalls(list);
+    setFolders(folderList);
+    setLoaded(true);
     setSelected((current) => current ?? list[0]?.id ?? null);
   }, []);
+
+  // A remembered folder that no longer exists falls back to every call.
+  useEffect(() => {
+    if (loaded && scope.kind === "folder" && !folders.includes(scope.name)) setScope({ kind: "all" });
+  }, [loaded, folders, scope, setScope]);
+
+  const moveCall = useCallback(
+    async (call: Call, folder: string | null) => {
+      try {
+        await api.moveCall(call.id, folder);
+        await refresh();
+      } catch (e) {
+        showError(e);
+      }
+    },
+    [refresh, showError],
+  );
+  const { drag, start: startDrag, justDropped } = useCallDrag(moveCall);
 
   const importPaths = useCallback(
     async (paths: string[]) => {
       if (paths.length === 0) return;
       try {
         const imported = await api.importFiles(paths);
+        // Imported while looking at a folder: that is probably where they belong.
+        if (scope.kind === "folder") {
+          await Promise.all(imported.filter((c) => !c.folder).map((c) => api.moveCall(c.id, scope.name)));
+        }
         await refresh();
         if (imported[0]) setSelected(imported[0].id);
       } catch (e) {
-        setError(String(e));
+        showError(e);
       }
     },
-    [refresh],
+    [refresh, scope, showError],
   );
 
   const pickFiles = async () => {
@@ -56,15 +93,15 @@ export function App() {
       if (island.kind === "recording") await api.stopRecording();
       else setSelected(await api.startRecording());
     } catch (e) {
-      setError(String(e));
+      showError(e);
     }
   };
 
   useEffect(() => {
-    refresh().catch((e) => setError(String(e)));
+    refresh().catch(showError);
     api.doctor().then(setDoctor);
     api.islandState().then(setIsland);
-  }, [refresh]);
+  }, [refresh, showError]);
 
   // Recording state, new recordings and "open this call" requests from the island.
   useEffect(() => {
@@ -101,10 +138,52 @@ export function App() {
     return () => void unlisten.then((fn) => fn());
   }, [importPaths]);
 
+  const visible = useMemo(() => {
+    const words = normalize(query).split(/\s+/).filter(Boolean);
+    const matches = (call: Call) => {
+      const text = normalize(`${call.title} ${call.folder ?? ""}`);
+      return words.every((word) => text.includes(word));
+    };
+    // A search looks in every folder.
+    const inView = calls.filter((call) => (words.length > 0 ? matches(call) : inScope(call, scope)));
+    return sortCalls(inView, sort);
+  }, [calls, query, scope, sort]);
+
+  const callMenu = (call: Call) =>
+    popupMenu([
+      {
+        text: "Renombrar",
+        action: () => {
+          setSelected(call.id);
+          setRenaming(call.id);
+        },
+      },
+      {
+        text: "Mover a",
+        items: [
+          { text: "Sin carpeta", checked: !call.folder, action: () => moveCall(call, null) },
+          ...(folders.length > 0 ? (["separator"] as const) : []),
+          ...folders.map((name) => ({ text: name, checked: call.folder === name, action: () => moveCall(call, name) })),
+        ],
+      },
+      "separator",
+      { text: "Mostrar en Finder", action: () => api.getCall(call.id).then((d) => revealItemInDir(d.dir)) },
+    ]);
+
+  const sortMenu = () =>
+    popupMenu(
+      (Object.keys(SORT_LABELS) as Sort[]).map((key) => ({
+        text: SORT_LABELS[key],
+        checked: key === sort,
+        action: () => setSort(key),
+      })),
+    );
+
   const current = calls.find((c) => c.id === selected) ?? null;
+  const searching = query.trim().length > 0;
 
   return (
-    <div className="app">
+    <div className={`app ${drag ? "dragging-call" : ""}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Llamadas</h1>
@@ -117,7 +196,54 @@ export function App() {
             </button>
           </div>
         </header>
-        <CallList calls={calls} selected={selected} progress={progress} onSelect={setSelected} />
+
+        <div className="sidebar-tools">
+          <label className="search">
+            <SearchIcon />
+            <input
+              type="search"
+              placeholder="Buscar"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            />
+          </label>
+          <button className="icon-button" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
+            <SortIcon />
+          </button>
+        </div>
+
+        <div className="sidebar-scroll">
+          {!searching && (
+            <Folders
+              folders={folders}
+              calls={calls}
+              scope={scope}
+              onScope={setScope}
+              dropTarget={drag?.target}
+              onChanged={refresh}
+              onError={showError}
+            />
+          )}
+          <CallList
+            calls={visible}
+            sort={sort}
+            selected={selected}
+            progress={progress}
+            showFolder={searching || scope.kind === "all"}
+            dragging={drag?.call.id}
+            emptyText={
+              searching
+                ? "Ninguna llamada coincide."
+                : calls.length === 0
+                  ? "Todavía no hay llamadas."
+                  : "No hay llamadas acá. Arrastrá alguna a esta carpeta."
+            }
+            onSelect={(id) => !justDropped() && setSelected(id)}
+            onDragStart={startDrag}
+            onContextMenu={callMenu}
+          />
+        </div>
       </aside>
 
       <main className="content">
@@ -128,7 +254,15 @@ export function App() {
           </div>
         )}
         {current ? (
-          <CallView call={current} progress={progress[current.id]} />
+          <CallView
+            call={current}
+            progress={progress[current.id]}
+            folders={folders}
+            renameRequested={renaming === current.id}
+            onRenameStarted={() => setRenaming(null)}
+            onChanged={refresh}
+            onError={showError}
+          />
         ) : (
           <div className="empty">
             <p className="empty-title">Arrastrá una grabación acá</p>
@@ -143,6 +277,12 @@ export function App() {
       {dragging && (
         <div className="drop-overlay">
           <p>Soltá para transcribir</p>
+        </div>
+      )}
+
+      {drag && (
+        <div className="drag-ghost" style={{ left: drag.x + 12, top: drag.y + 8 }}>
+          {drag.call.title}
         </div>
       )}
     </div>

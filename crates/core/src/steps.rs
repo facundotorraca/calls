@@ -5,7 +5,8 @@ use std::fs;
 use anyhow::{Context, Result, bail};
 
 use crate::call::TrackRole;
-use crate::engines::{AudioExtractor, TranscribeRequest, Transcriber};
+use crate::engines::{AudioExtractor, Llm, TranscribeRequest, Transcriber};
+use crate::summary::{SUMMARY_JSON, SUMMARY_MD, Summary};
 use crate::transcript::{self, TRANSCRIPT_JSON, TRANSCRIPT_MD};
 use crate::{Call, Step, StepContext, Track, Transcript};
 
@@ -112,4 +113,78 @@ impl Step for RenderMarkdown {
         fs::write(ctx.dir.join(TRANSCRIPT_MD), transcript.to_markdown(&call.title))?;
         Ok(())
     }
+}
+
+/// Summary, decisions and action items (`summary.json`, `summary.md`), by an LLM.
+pub struct Summarize {
+    pub llm: Box<dyn Llm>,
+    /// Language to write in, e.g. `español`, whatever the call's language.
+    pub language: String,
+}
+
+impl Summarize {
+    fn system_prompt(&self) -> String {
+        format!(
+            "You summarize work calls for the person who recorded them. Write in {language}.\n\
+             Be concrete: names, numbers, dates and commitments as said in the call. Never add \
+             anything that was not said. The transcript comes from speech recognition and may \
+             contain misheard words: read them in context (a name spelled several ways is one person). \
+             When speakers are labeled, \"Yo\" is the person who recorded the call.\n\
+             - summary: one to three short paragraphs: why the call happened, what was discussed, how it ended.\n\
+             - decisions: what was agreed or decided. Empty if nothing was.\n\
+             - action_items: next steps someone committed to or was asked to do. owner: the person \
+             responsible as named in the call, or null. due: when, as said in the call, or null.",
+            language = self.language
+        )
+    }
+}
+
+impl Step for Summarize {
+    fn id(&self) -> &'static str {
+        "summarize"
+    }
+
+    fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
+        let json = fs::read_to_string(ctx.dir.join(TRANSCRIPT_JSON)).context("transcript not found")?;
+        let transcript: Transcript = serde_json::from_str(&json)?;
+        if transcript.segments.is_empty() {
+            bail!("the transcript is empty");
+        }
+
+        let prompt = format!(
+            "Call: {}\nDate: {}\n\nTranscript:\n{}",
+            call.title,
+            call.created_at.format("%Y-%m-%d %H:%M"),
+            dialogue(&transcript)
+        );
+        ctx.progress(0.1);
+        let answer = self.llm.json(&self.system_prompt(), &prompt, &Summary::schema())?;
+        let summary: Summary =
+            serde_json::from_value(answer).context("the model answered with an unexpected format")?;
+
+        fs::write(ctx.dir.join(SUMMARY_JSON), serde_json::to_vec_pretty(&summary)?)?;
+        fs::write(ctx.dir.join(SUMMARY_MD), summary.to_markdown(&call.title))?;
+        Ok(())
+    }
+}
+
+/// The transcript as compact text for a model: one line per speaker turn.
+fn dialogue(transcript: &Transcript) -> String {
+    let mut out = String::new();
+    let mut current: Option<&Option<String>> = None;
+    for segment in &transcript.segments {
+        if current != Some(&segment.speaker) {
+            if current.is_some() {
+                out.push('\n');
+            }
+            out.push_str(&format!("[{}]", transcript::format_timestamp(segment.start_ms)));
+            if let Some(speaker) = &segment.speaker {
+                out.push_str(&format!(" {speaker}:"));
+            }
+            current = Some(&segment.speaker);
+        }
+        out.push(' ');
+        out.push_str(&segment.text);
+    }
+    out
 }

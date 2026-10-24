@@ -78,6 +78,9 @@ impl Track {
 pub struct Call {
     pub id: CallId,
     pub title: String,
+    /// Folder in the library's sidebar. A label, not a directory: call folders never move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     pub created_at: DateTime<Local>,
     /// Original file the call was imported from. It is referenced, never copied or moved.
     pub source: Option<PathBuf>,

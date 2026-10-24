@@ -42,7 +42,7 @@ impl AudioExtractor for Ffmpeg {
             .args(["-progress", "pipe:1", "-nostats", "-stats_period", "0.5"])
             .arg(output);
 
-        run_lines(cmd, Stream::Stdout, |line| {
+        run_lines(cmd, None, Stream::Stdout, |line| {
             // `-progress` prints key=value pairs; out_time_us is the position reached so far.
             if let (Some(total), Some(us)) = (duration_ms, line.strip_prefix("out_time_us="))
                 && let Ok(us) = us.parse::<u64>()

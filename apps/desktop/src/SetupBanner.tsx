@@ -7,7 +7,10 @@ export function SetupBanner({ doctor }: { doctor: Doctor }) {
   if (!doctor.whisper_cli) missing.push(["whisper-cli", "make sidecars"]);
   if (!doctor.whisper_model_present) missing.push(["el modelo de Whisper", "make models"]);
   if (!doctor.calls_audio) missing.push(["calls-audio (grabar llamadas)", "make sidecars"]);
-  if (missing.length === 0) return null;
+  if (missing.length === 0) {
+    // Not blocking: transcripts work without the LLM.
+    return doctor.llm_error ? <div className="banner warning">Resúmenes no disponibles: {doctor.llm_error}</div> : null;
+  }
 
   return (
     <div className="banner warning">

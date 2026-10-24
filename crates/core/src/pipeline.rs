@@ -71,7 +71,7 @@ impl Pipeline {
             }
 
             call.status = Status::Processing { step: step_id.into() };
-            library.save(&call)?;
+            library.save_progress(&mut call)?;
             emit(Event::StepStarted { call_id: id.clone(), step: step_id.into() });
 
             let progress = |fraction| emit(Event::StepProgress { call_id: id.clone(), step: step_id.into(), fraction });
@@ -80,18 +80,18 @@ impl Pipeline {
             if let Err(e) = step.run(&mut call, &ctx) {
                 let error = format!("{e:#}");
                 call.status = Status::Failed { step: step_id.into(), error: error.clone() };
-                library.save(&call)?;
+                library.save_progress(&mut call)?;
                 emit(Event::Failed { call_id: id.clone(), step: step_id.into(), error });
                 return Err(e);
             }
 
             call.completed_steps.insert(step_id.into(), Local::now());
-            library.save(&call)?;
+            library.save_progress(&mut call)?;
             emit(Event::StepFinished { call_id: id.clone(), step: step_id.into() });
         }
 
         call.status = Status::Ready;
-        library.save(&call)?;
+        library.save_progress(&mut call)?;
         emit(Event::Finished { call_id: id.clone() });
         Ok(())
     }

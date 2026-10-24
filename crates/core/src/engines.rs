@@ -28,3 +28,9 @@ pub struct TranscribeRequest<'a> {
 pub trait Transcriber: Send + Sync {
     fn transcribe(&self, request: &TranscribeRequest, progress: Progress) -> Result<Transcript>;
 }
+
+/// A language model, local or remote.
+pub trait Llm: Send + Sync {
+    /// Asks for an answer as a JSON value matching `schema` (a JSON Schema object).
+    fn json(&self, system: &str, prompt: &str, schema: &serde_json::Value) -> Result<serde_json::Value>;
+}

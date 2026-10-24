@@ -52,6 +52,12 @@ fn main() {
             commands::get_call,
             commands::import_files,
             commands::process_call,
+            commands::rename_call,
+            commands::move_call,
+            commands::list_folders,
+            commands::create_folder,
+            commands::rename_folder,
+            commands::delete_folder,
             commands::doctor,
             commands::island_state,
             commands::start_recording,
@@ -81,14 +87,15 @@ pub fn show_main(app: &AppHandle) {
 /// Picks up work cut short by quitting the app: calls waiting for or in the middle of
 /// processing, and recordings (the audio sidecar finalizes the files when the app goes away).
 fn resume_interrupted(library: &Library, queue: &Queue) -> anyhow::Result<()> {
-    for mut call in library.list()? {
+    for call in library.list()? {
         match call.status {
             Status::Pending | Status::Processing { .. } => queue.push(call.id),
             Status::Recording => {
                 let dir = library.dir(&call.id);
-                call.tracks.retain(|t| dir.join(&t.file).exists());
-                call.status = Status::Pending;
-                library.save(&call)?;
+                library.update(&call.id, |call| {
+                    call.tracks.retain(|t| dir.join(&t.file).exists());
+                    call.status = Status::Pending;
+                })?;
                 queue.push(call.id);
             }
             Status::Ready | Status::Failed { .. } => {}
@@ -116,13 +123,13 @@ fn spawn_queue(app: AppHandle, library: Library, settings: Settings) -> Queue {
 /// Errors raised before any step ran (e.g. whisper-cli missing) are not recorded by the
 /// pipeline itself; record them so the call does not stay pending forever.
 fn mark_failed_if_unhandled(library: &Library, id: &CallId, error: &anyhow::Error, emit: &dyn Fn(Event)) {
-    let Ok(mut call) = library.load(id) else { return };
+    let Ok(call) = library.load(id) else { return };
     if matches!(call.status, Status::Failed { .. }) {
         return;
     }
     let error = format!("{error:#}");
-    call.status = Status::Failed { step: "setup".into(), error: error.clone() };
-    if library.save(&call).is_ok() {
+    let failed = Status::Failed { step: "setup".into(), error: error.clone() };
+    if library.update(id, |call| call.status = failed).is_ok() {
         emit(Event::Failed { call_id: id.clone(), step: "setup".into(), error });
     }
 }

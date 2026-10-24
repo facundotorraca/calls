@@ -6,7 +6,8 @@ You can also drop any existing recording on the app. Everything runs on your mac
 
 ## Setup
 
-Requires macOS 15+ on Apple Silicon, Xcode (for Swift), Rust, pnpm, `brew install cmake ffmpeg`.
+Requires macOS 15+ on Apple Silicon, Xcode (for Swift), Rust, pnpm, `brew install cmake ffmpeg uv`,
+and [Ollama](https://ollama.com) with a model (`ollama pull qwen3.5:35b`) for summaries.
 
 ```sh
 make setup   # JS deps + builds the sidecars + downloads models (~1.6 GB)
@@ -24,20 +25,21 @@ apps/desktop/          Tauri app
   src-tauri/           thin Rust layer: Tauri commands -> core
 crates/
   core/                domain, storage, pipeline. No UI, no concrete engines
-  engines/             adapters running external tools (ffmpeg, whisper-cli)
+  engines/             adapters running external tools (ffmpeg, whisper-cli, Ollama, Python)
   cli/                 `calls` command, same pipeline as the app
 sidecars/calls-audio/  Swift: call detection and recording with Apple's audio APIs
+workers/               Python sidecars (see workers/README.md)
 vendor/whisper.cpp/    pinned submodule, built into the whisper-cli sidecar
 scripts/               build sidecars, download models
 ```
 
 Dependencies point inwards: `desktop`/`cli` -> `engines` -> `core`. The core never knows
-which tool does the work, only the traits it needs (`AudioExtractor`, `Transcriber`).
+which tool does the work, only the traits it needs (`AudioExtractor`, `Transcriber`, `Llm`).
 
 **AI engines run as separate processes.** We call official binaries (whisper.cpp's
-`whisper-cli`, `ffmpeg`) through their CLI instead of linking third-party bindings. Swapping
-an engine means writing another adapter in `engines`. Future engines follow the same rule:
-LLMs over HTTP, Python-only models as a sidecar worker.
+`whisper-cli`, `ffmpeg`) through their CLI, LLMs over HTTP (Ollama) and Python-only models as
+workers (`PythonWorker`, JSON over stdio, environments managed by uv), instead of linking
+third-party bindings. Swapping an engine means writing another adapter in `engines`.
 
 ### Recording
 
@@ -65,8 +67,12 @@ after rebuilding.
 Each call goes through a list of steps (`crates/core/src/steps.rs`):
 
 ```
-extract_audio -> transcribe -> render_markdown
+extract_audio -> transcribe -> render_markdown -> summarize
 ```
+
+`summarize` asks the local LLM for a summary, decisions and action items (`summary.json`,
+`summary.md`), written in `summary_language`. It runs last, so the transcript is usable even
+if Ollama is closed; "Generar resumen" in the app runs it later.
 
 Completed steps are recorded in `call.json`, so processing is resumable (the app resumes
 pending calls on start) and new steps run over old calls automatically.
@@ -82,15 +88,22 @@ To add a feature (summary, action items, export to Notion...):
 Plain files are the source of truth, one folder per call in `~/Calls`:
 
 ```
-~/Calls/2026-10-23_1530_acme-kickoff/
-  call.json          metadata and processing state
-  audio.wav          16 kHz mono audio extracted from the recording
-  transcript.json    segments with timestamps (and speaker, once available)
-  transcript.md      readable transcript
+~/Calls/
+  library.json         folder list
+  2026-10-23_1530_acme-kickoff/
+    call.json          metadata (title, folder) and processing state
+    audio.wav          16 kHz mono audio extracted from the recording
+    transcript.json    segments with timestamps (and speaker, once available)
+    transcript.md      readable transcript
+    summary.json/.md   summary, decisions, action items
 ```
 
+Folders are labels (`folder` in `call.json`), not directories: call folders never move, so
+paths stay valid while you organize. The id (folder name) never changes either; renaming a
+call changes its `title` and rewrites the `.md` documents.
+
 The original recording is referenced, never copied or moved. Settings and models live in
-`~/Library/Application Support/calls/` (`settings.json`, `models/`).
+`~/Library/Application Support/calls/` (`settings.json`, `models/`, `workers/` environments).
 
 ### Settings
 
@@ -104,14 +117,17 @@ The original recording is referenced, never copied or moved. Settings and models
   "vad_model": "silero-v6.2.0",
   "detect_calls": true,
   "auto_record": false,
-  "call_apps": [{ "bundle_prefix": "us.zoom.xos", "name": "Zoom" }]
+  "call_apps": [{ "bundle_prefix": "us.zoom.xos", "name": "Zoom" }],
+  "summarize": true,
+  "summary_language": "español",
+  "llm": { "base_url": "http://localhost:11434", "model": "qwen3.5:35b" }
 }
 ```
 
 ## Roadmap
 
 - Transcript as paragraphs per speaker.
-- Speaker diarization of the other side (pyannote community-1, Python sidecar worker).
-- Local LLM (llama.cpp `llama-server`): speaker names, summary, action items.
+- Speaker diarization (pyannote community-1 as a Python worker), word level timestamps.
+- Speaker names with the LLM.
 - Search across calls.
 - Integrations (calendar for titles, Notion export).

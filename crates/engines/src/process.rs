@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 
@@ -12,16 +12,29 @@ pub enum Stream {
     Stderr,
 }
 
-/// Runs `cmd` calling `on_line` for each line the tool prints on `stream`. The other stream
-/// is drained in the background. On failure, the last lines of both end up in the error.
-pub fn run_lines(mut cmd: Command, stream: Stream, mut on_line: impl FnMut(&str)) -> Result<()> {
+/// Runs `cmd` calling `on_line` for each line the tool prints on `stream`, feeding it `input`
+/// on stdin if given. The other stream is drained in the background. On failure, the last
+/// lines of both end up in the error.
+pub fn run_lines(
+    mut cmd: Command,
+    input: Option<Vec<u8>>,
+    stream: Stream,
+    mut on_line: impl FnMut(&str),
+) -> Result<()> {
     let program = cmd.get_program().to_string_lossy().into_owned();
     let mut child = cmd
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("could not start {program}"))?;
+
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        // From a thread: a tool may start printing before it has read all its input.
+        thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+    }
 
     let stdout = child.stdout.take().expect("piped");
     let stderr = child.stderr.take().expect("piped");

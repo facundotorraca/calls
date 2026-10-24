@@ -1,0 +1,11 @@
+[package]
+name = "calls-engines"
+description = "Adapters that implement the core traits by running external tools (ffmpeg, whisper.cpp)."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+calls-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true

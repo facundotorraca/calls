@@ -15,3 +15,15 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# Rust
+target/
+
+# Desktop app
+node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/
+
+# Swift
+.build/

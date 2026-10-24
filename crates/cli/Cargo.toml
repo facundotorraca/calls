@@ -1,0 +1,15 @@
+[package]
+name = "calls-cli"
+description = "Command line front end: same pipeline as the desktop app, handy for scripting and debugging."
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "calls"
+path = "src/main.rs"
+
+[dependencies]
+calls-core.workspace = true
+calls-engines.workspace = true
+anyhow.workspace = true
+clap.workspace = true

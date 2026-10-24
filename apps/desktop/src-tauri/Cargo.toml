@@ -1,0 +1,21 @@
+[package]
+name = "calls-desktop"
+description = "Desktop app: thin Tauri layer exposing the core to the React UI."
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+calls-core.workspace = true
+calls-engines.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+
+# Already part of Tauri's own dependency tree; used to tune the island's NSWindow.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSResponder"] }

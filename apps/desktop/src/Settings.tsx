@@ -322,7 +322,7 @@ function DiarizationSetup({ downloads }: { downloads: Downloads }) {
       </p>
       <ol className="setup-steps">
         <li>
-          <span>Aceptá las condiciones del modelo.</span>
+          <span>Con tu cuenta iniciada, aceptá las condiciones del modelo (formulario arriba de todo).</span>
           <button className="ghost-button tech-label" onClick={() => openUrl(DIARIZATION_MODEL)}>
             <ExternalIcon />
             abrir

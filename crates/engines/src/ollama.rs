@@ -55,6 +55,8 @@ impl Ollama {
         #[derive(Deserialize)]
         struct Response {
             message: Message,
+            #[serde(default)]
+            done_reason: String,
         }
         #[derive(Deserialize)]
         struct Message {
@@ -65,7 +67,12 @@ impl Ollama {
         if !response.status().is_success() {
             bail!("Ollama: {} {}", response.status(), response.text().unwrap_or_default());
         }
-        Ok(response.json::<Response>()?.message.content)
+        let response: Response = response.json()?;
+        // A thinking model can spend the whole context thinking and never answer.
+        if response.message.content.trim().is_empty() && response.done_reason == "length" {
+            bail!("the model ran out of context before answering (it thought for too long)");
+        }
+        Ok(response.message.content)
     }
 }
 
@@ -75,14 +82,14 @@ impl Llm for Ollama {
         // `format` when thinking is off, so ask for plain JSON.)
         let described = format!("{system}\n\nAnswer only with JSON matching this JSON Schema:\n{schema}");
         if let Ok(answer) = self.chat(&described, prompt, json!("json"), false)
-            && let Ok(value) = serde_json::from_str::<Value>(&answer)
+            && let Ok(value) = parse_json(&answer)
             && has_required_fields(&value, schema)
         {
             return Ok(value);
         }
         // Strict path: slower, but Ollama enforces the schema.
         let answer = self.chat(system, prompt, schema.clone(), true)?;
-        serde_json::from_str(&answer).context("the model did not answer with JSON")
+        parse_json(&answer).context("the model did not answer with JSON")
     }
 }
 
@@ -188,6 +195,16 @@ fn endpoint(base_url: &str, path: &str) -> String {
     format!("{}/api/{path}", base_url.trim_end_matches('/'))
 }
 
+/// The JSON in an answer. Some models wrap it in a Markdown code block even when asked for
+/// JSON only, so whatever surrounds the outermost object is dropped.
+fn parse_json(answer: &str) -> serde_json::Result<Value> {
+    let json = match (answer.find('{'), answer.rfind('}')) {
+        (Some(start), Some(end)) if start < end => &answer[start..=end],
+        _ => answer,
+    };
+    serde_json::from_str(json)
+}
+
 fn has_required_fields(value: &Value, schema: &Value) -> bool {
     let required = schema["required"].as_array().map(Vec::as_slice).unwrap_or_default();
     required.iter().filter_map(Value::as_str).all(|field| value.get(field).is_some())
@@ -196,6 +213,13 @@ fn has_required_fields(value: &Value, schema: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_in_a_code_block() {
+        assert_eq!(parse_json("```json\n{\"a\": 1}\n```").unwrap(), json!({ "a": 1 }));
+        assert_eq!(parse_json("{\"a\": {}}").unwrap(), json!({ "a": {} }));
+        assert!(parse_json("").is_err());
+    }
 
     #[test]
     fn required_fields() {

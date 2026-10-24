@@ -20,10 +20,13 @@ fn worker() -> Result<PythonWorker> {
     Ok(PythonWorker::locate("diarize")?.env("HF_HOME", hf_home()))
 }
 
-/// Whether the model is on disk.
+/// Whether the model is on disk. Its config is what counts: a refused download (gated, not
+/// accepted) still leaves the public README behind.
 pub fn is_downloaded() -> bool {
     let snapshots = hf_home().join("hub/models--pyannote--speaker-diarization-community-1/snapshots");
-    snapshots.read_dir().is_ok_and(|mut entries| entries.next().is_some())
+    snapshots
+        .read_dir()
+        .is_ok_and(|entries| entries.flatten().any(|snapshot| snapshot.path().join("config.yaml").exists()))
 }
 
 /// Downloads the model with a Hugging Face token. The first run also installs the

@@ -22,22 +22,36 @@ def emit(**message) -> None:
 
 
 def download(token: str) -> dict:
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import snapshot_download, whoami
     from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 
+    def refused(e: HfHubHTTPError) -> bool:
+        return e.response is not None and e.response.status_code in (401, 403)
+
     emit(progress=0.1)
-    # A wrong token and conditions not accepted look the same from here: both are a 401.
-    refused = (
-        "Hugging Face did not allow the download: check the token, and accept the model's "
-        f"conditions at https://huggingface.co/{MODEL}"
+    # The token first: a wrong token and conditions not accepted both fail the download
+    # with a 401, and each needs a different fix.
+    try:
+        whoami(token=token)
+    except HfHubHTTPError as e:
+        if refused(e):
+            raise RuntimeError(
+                "Hugging Face no reconoce el token: copialo de nuevo desde "
+                "https://huggingface.co/settings/tokens"
+            ) from None
+        raise
+    not_accepted = (
+        "Falta aceptar las condiciones del modelo: entrá a "
+        f"https://huggingface.co/{MODEL} con tu cuenta, completá el formulario de arriba "
+        "y tocá «Agree and access repository»"
     )
     try:
         snapshot_download(MODEL, token=token)
     except GatedRepoError:
-        raise RuntimeError(refused) from None
+        raise RuntimeError(not_accepted) from None
     except HfHubHTTPError as e:
-        if e.response is not None and e.response.status_code in (401, 403):
-            raise RuntimeError(refused) from None
+        if refused(e):
+            raise RuntimeError(not_accepted) from None
         raise
     emit(progress=1.0)
     return {"model": MODEL}

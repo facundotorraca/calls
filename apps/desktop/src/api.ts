@@ -92,6 +92,8 @@ export interface Doctor {
 
 /** Mirrors `Settings` in crates/core/src/settings.rs. Sent back whole when saving. */
 export interface Settings {
+  /** How the person using the app is labelled in transcripts. Empty: "Yo". */
+  user_name: string;
   library_dir: string;
   /** ISO 639-1 code, or `auto`. */
   language: string;
@@ -153,6 +155,8 @@ export const api = {
   renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
   /** `null` takes the call out of any folder; a new name creates the folder. */
   moveCall: (id: CallId, folder: string | null) => invoke<Call>("move_call", { id, folder }),
+  /** To the macOS Trash. Not while recording or processing. */
+  trashCall: (id: CallId) => invoke<void>("trash_call", { id }),
   listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<string>("create_folder", { name }),
   renameFolder: (from: string, to: string) => invoke<void>("rename_folder", { from, to }),
@@ -182,6 +186,9 @@ export const api = {
   diarizationReady: () => invoke<boolean>("diarization_ready"),
   /** Renames a speaker throughout the call's transcript. */
   renameSpeaker: (id: CallId, from: string, to: string) => invoke<void>("rename_speaker", { id, from, to }),
+  /** How many voices the user's voice was learnt from; null if it was not. */
+  myVoice: () => invoke<number | null>("my_voice"),
+  forgetMyVoice: () => invoke<void>("forget_my_voice"),
 };
 
 /** What the island shows; mirrors `Island` in src-tauri/src/recorder.rs. */
@@ -202,6 +209,9 @@ export const onLevels = (handler: (levels: Levels) => void) =>
   listen<Levels>("audio_levels", (e) => handler(e.payload));
 export const onLibraryChanged = (handler: () => void) => listen("library_changed", () => handler());
 export const onSelectCall = (handler: (id: CallId) => void) => listen<CallId>("select_call", (e) => handler(e.payload));
+
+/** The speaker label of the person using the app. */
+export const me = (settings: Settings) => settings.user_name.trim() || "Yo";
 
 export const onSettingsChanged = (handler: () => void) => listen("settings_changed", () => handler());
 export const onDownload = (handler: (event: DownloadEvent) => void) =>

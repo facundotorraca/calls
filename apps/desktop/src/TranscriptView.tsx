@@ -58,10 +58,12 @@ interface Props {
   onSeek?: (ms: number) => void;
   /** Clicking a speaker's name renames them throughout the call. */
   onRenameSpeaker?: (from: string, to: string) => void;
+  /** The label of the person using the app, offered as "soy yo" when renaming. */
+  me?: string;
 }
 
 /** Re-renders only when the playing segment changes, not on every frame of playback. */
-export const TranscriptView = memo(function TranscriptView({ transcript, active, onSeek, onRenameSpeaker }: Props) {
+export const TranscriptView = memo(function TranscriptView({ transcript, active, onSeek, onRenameSpeaker, me }: Props) {
   const names = speakers(transcript);
   const activeEl = useRef<HTMLSpanElement>(null);
   const previous = useRef<HTMLSpanElement | null>(null);
@@ -95,7 +97,7 @@ export const TranscriptView = memo(function TranscriptView({ transcript, active,
               {turn.speaker && (
                 <div className="turn-speaker">
                   <span className="avatar">{initial(turn.speaker)}</span>
-                  <SpeakerName name={turn.speaker} onRename={onRenameSpeaker} />
+                  <SpeakerName name={turn.speaker} me={me} onRename={onRenameSpeaker} />
                 </div>
               )}
               <p>
@@ -125,7 +127,15 @@ function initial(speaker: string): string {
 }
 
 /** The speaker's name; clicked, an input that renames them in the whole call. */
-function SpeakerName({ name, onRename }: { name: string; onRename?: (from: string, to: string) => void }) {
+function SpeakerName({
+  name,
+  me,
+  onRename,
+}: {
+  name: string;
+  me?: string;
+  onRename?: (from: string, to: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
   const done = useRef(false);
@@ -156,19 +166,36 @@ function SpeakerName({ name, onRename }: { name: string; onRename?: (from: strin
     if (save && next && next !== name) onRename(name, next);
   };
   return (
-    <input
-      className="speaker-input"
-      value={value}
-      autoFocus
-      size={Math.max(8, value.length + 1)}
-      onFocus={(e) => e.target.select()}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        if (e.key === "Escape") finish(false);
-      }}
-    />
+    <span className="speaker-edit">
+      <input
+        className="speaker-input"
+        value={value}
+        autoFocus
+        size={Math.max(8, value.length + 1)}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") finish(true);
+          if (e.key === "Escape") finish(false);
+        }}
+      />
+      {me && name !== me && (
+        // Before the input's blur, which would save what is typed instead.
+        <button
+          className="ghost-button tech-label"
+          title="Este hablante sos vos: la app aprende tu voz para reconocerte en otras llamadas"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            done.current = true;
+            setEditing(false);
+            onRename(name, me);
+          }}
+        >
+          soy yo
+        </button>
+      )}
+    </span>
   );
 }
 

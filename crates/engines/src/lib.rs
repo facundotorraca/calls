@@ -10,6 +10,7 @@ mod process;
 pub mod pyannote;
 pub mod python;
 pub mod sidecar;
+pub mod trash;
 mod whisper;
 
 use std::path::PathBuf;
@@ -17,7 +18,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use calls_core::Pipeline;
 use calls_core::Settings;
+use calls_core::settings::my_voice_path;
 use calls_core::steps::{Diarize, ExtractAudio, MixPlayback, NameSpeakers, RenderMarkdown, Summarize, Transcribe};
+use calls_core::voices::MyVoice;
 use serde::Serialize;
 
 pub use ffmpeg::Ffmpeg;
@@ -38,7 +41,11 @@ pub fn default_pipeline(settings: &Settings) -> Result<Pipeline> {
     // Off, or the model not downloaded yet: transcripts still work, just without voices.
     let diarize = settings.diarize && pyannote::is_downloaded();
     if diarize {
-        pipeline = pipeline.with(Diarize { diarizer: Box::new(pyannote::Pyannote::locate()?) });
+        pipeline = pipeline.with(Diarize {
+            diarizer: Box::new(pyannote::Pyannote::locate()?),
+            me: settings.me(),
+            my_voice: MyVoice::load(&my_voice_path()),
+        });
     }
     pipeline = pipeline
         .with(RenderMarkdown)
@@ -50,11 +57,12 @@ pub fn default_pipeline(settings: &Settings) -> Result<Pipeline> {
         let llm = || Ollama::new(&settings.llm.base_url, &settings.llm.model);
         // Names first, so the summary can say who said what.
         if diarize {
-            pipeline = pipeline.with(NameSpeakers { llm: Box::new(llm()?) });
+            pipeline = pipeline.with(NameSpeakers { llm: Box::new(llm()?), me: settings.me() });
         }
         let vocabulary = settings.vocabulary.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).map(Into::into);
         pipeline = pipeline.with(Summarize {
             llm: Box::new(llm()?),
+            me: settings.me(),
             language: settings.summary_language.clone(),
             vocabulary: vocabulary.collect(),
         });

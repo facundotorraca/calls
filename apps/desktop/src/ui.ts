@@ -34,7 +34,15 @@ export function usePersistentState<T>(key: string, initial: T): [T, (value: T) =
 
 export type MenuEntry =
   | "separator"
-  | { text: string; action?: () => void; checked?: boolean; enabled?: boolean; items?: MenuEntry[] };
+  | {
+      text: string;
+      action?: () => void;
+      checked?: boolean;
+      enabled?: boolean;
+      /** Shown next to the item, e.g. `CmdOrCtrl+Backspace`; the key itself is handled elsewhere. */
+      accelerator?: string;
+      items?: MenuEntry[];
+    };
 
 /** Shows a native context menu at the cursor. */
 export async function popupMenu(entries: MenuEntry[]) {
@@ -50,6 +58,7 @@ function toItem(entry: MenuEntry): ItemOptions {
   const item: CheckMenuItemOptions = {
     text: entry.text,
     enabled: entry.enabled ?? true,
+    accelerator: entry.accelerator,
     action: entry.action,
   };
   // Tauri makes it a check item only when the key is present.

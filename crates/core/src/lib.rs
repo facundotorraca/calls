@@ -14,6 +14,7 @@ pub mod settings;
 pub mod steps;
 pub mod summary;
 pub mod transcript;
+pub mod voices;
 
 pub use call::{Call, CallId, Status, Track, TrackRole};
 pub use library::{Folder, FolderColor, Library};

@@ -151,6 +151,18 @@ function useDownloads(): Downloads {
 function GeneralPage({ settings, save }: { settings: SettingsData; save: Save }) {
   return (
     <SettingsPage title="general">
+      <Group label="vos">
+        <Field label="Tu nombre" hint="Cómo aparecés en las transcripciones y los resúmenes, en vez de «Yo».">
+          <TextInput
+            value={settings.user_name}
+            placeholder="Yo"
+            optional
+            onCommit={(user_name) => save({ user_name })}
+          />
+        </Field>
+        <MyVoice />
+      </Group>
+
       <Group label="grabación">
         <Field label="Detectar llamadas" hint="Muestra la isla cuando Zoom, Meet o Teams empiezan a usar el micrófono.">
           <Switch checked={settings.detect_calls} onChange={(detect_calls) => save({ detect_calls })} />
@@ -177,6 +189,51 @@ function GeneralPage({ settings, save }: { settings: SettingsData; save: Save })
         </Field>
       </Group>
     </SettingsPage>
+  );
+}
+
+/** The user's voice, learnt from the speakers they mark as "soy yo". */
+function MyVoice() {
+  const [samples, setSamples] = useState<number | null>(null);
+
+  // Learnt in the main window: check again when coming back here.
+  useEffect(() => {
+    const load = () => void api.myVoice().then(setSamples);
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, []);
+
+  const forget = async () => {
+    const yes = await ask("¿Olvidar tu voz?\n\nLa app deja de reconocerte hasta que vuelvas a marcar «soy yo».", {
+      title: "Olvidar tu voz",
+      kind: "warning",
+      okLabel: "Olvidar",
+      cancelLabel: "Cancelar",
+    });
+    if (yes) await api.forgetMyVoice().then(() => setSamples(null));
+  };
+
+  return (
+    <Field
+      label="Tu voz"
+      hint={
+        samples
+          ? "Te reconoce sola en las llamadas importadas. Marcar «soy yo» en más llamadas la afina."
+          : "En una transcripción, tocá el hablante que sos vos y elegí «soy yo»: la app aprende tu voz y te reconoce sola en las próximas llamadas importadas."
+      }
+    >
+      {samples ? (
+        <>
+          <State tone="ok">aprendida{samples > 1 ? ` · ${samples} voces` : ""}</State>
+          <button className="ghost-button tech-label" onClick={forget}>
+            olvidar
+          </button>
+        </>
+      ) : (
+        <span className="field-hint">sin aprender</span>
+      )}
+    </Field>
   );
 }
 
@@ -635,18 +692,30 @@ function Select({
 }
 
 /** Saves on Enter or when leaving the field, not on every keystroke. */
-function TextInput({ value, onCommit }: { value: string; onCommit: (value: string) => void }) {
+function TextInput({
+  value,
+  placeholder,
+  optional,
+  onCommit,
+}: {
+  value: string;
+  placeholder?: string;
+  /** Can be left empty. */
+  optional?: boolean;
+  onCommit: (value: string) => void;
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => {
     const next = draft.trim();
-    if (next && next !== value) onCommit(next);
+    if ((next || optional) && next !== value) onCommit(next);
     else setDraft(value);
   };
   return (
     <input
       className="text-input"
       value={draft}
+      placeholder={placeholder}
       spellCheck={false}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

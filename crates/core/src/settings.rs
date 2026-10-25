@@ -11,6 +11,8 @@ use crate::detect::CallApp;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// What the person using the app is called in transcripts and summaries. Empty: "Yo".
+    pub user_name: String,
     /// Where call folders are stored.
     pub library_dir: PathBuf,
     /// ISO 639-1 code, or `auto`.
@@ -55,6 +57,7 @@ impl Default for LlmSettings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            user_name: String::new(),
             library_dir: home_dir().join("Calls"),
             language: "auto".into(),
             whisper_model: "large-v3-turbo".into(),
@@ -71,7 +74,18 @@ impl Default for Settings {
     }
 }
 
+/// The speaker label of the person using the app, when they have not given their name.
+pub const ME: &str = "Yo";
+
 impl Settings {
+    /// The speaker label of the person using the app: their name, or "Yo".
+    pub fn me(&self) -> String {
+        match self.user_name.trim() {
+            "" => ME.into(),
+            name => name.into(),
+        }
+    }
+
     /// The vocabulary as a prompt for the transcriber, if there is one. Whisper reads the
     /// prompt as text said just before, which nudges it towards these spellings.
     ///
@@ -138,6 +152,11 @@ pub fn model_path(name: &str) -> PathBuf {
 
 pub fn settings_path() -> PathBuf {
     data_dir().join("settings.json")
+}
+
+/// The voice of the person using the app, learnt from the calls (see [`crate::voices`]).
+pub fn my_voice_path() -> PathBuf {
+    data_dir().join("voice.json")
 }
 
 fn home_dir() -> PathBuf {

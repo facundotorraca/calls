@@ -1936,6 +1936,12 @@ html.island-window body {
   border-bottom-color: var(--muted-foreground);
 }
 
+.speaker-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .speaker-input {
   padding: 0 4px;
   border: 1px solid var(--foreground);

@@ -162,7 +162,7 @@ impl Recorder {
 
         let call_app = s.call.clone();
         let title = call_app.as_ref().map(|a| format!("Llamada en {}", a.name)).unwrap_or_else(|| "Grabación".into());
-        let mut call = st.library.create_recording(&title)?;
+        let mut call = st.library.create_recording(&title, &st.settings().me())?;
         if let Err(e) = daemon.start(&st.library.dir(&call.id), call_app.as_ref().map(|a| a.bundle_prefix.as_str())) {
             call.status = Status::Failed { step: "recording".into(), error: format!("{e:#}") };
             st.library.save(&call)?;

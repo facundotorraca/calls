@@ -95,6 +95,7 @@ class Progress:
 
 
 def diarize(request: dict) -> dict:
+    import numpy as np
     import torch
     from pyannote.audio import Pipeline
 
@@ -122,8 +123,15 @@ def diarize(request: dict) -> dict:
         {"start_ms": round(turn.start * 1000), "end_ms": round(turn.end * 1000), "speaker": speaker}
         for turn, _, speaker in annotation.itertracks(yield_label=True)
     ]
+    # Each voice's fingerprint (an embedding), so the app can recognize it in other calls.
+    voices = {}
+    embeddings = getattr(output, "speaker_embeddings", None)
+    if embeddings is not None:
+        for label, embedding in zip(output.speaker_diarization.labels(), embeddings):
+            if np.isfinite(embedding).all():
+                voices[label] = [round(float(x), 5) for x in embedding]
     emit(progress=1.0)
-    return {"turns": turns}
+    return {"turns": turns, "voices": voices}
 
 
 def handle(request: dict) -> dict:

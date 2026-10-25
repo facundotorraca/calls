@@ -10,6 +10,7 @@ import {
   onSelectCall,
   onSettingsChanged,
   onDownload,
+  me,
   MEDIA_EXTENSIONS,
   type Call,
   type CallId,
@@ -32,6 +33,7 @@ export function App() {
   const [selected, setSelected] = useState<CallId | null>(null);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [doctor, setDoctor] = useState<Doctor | null>(null);
+  const [myLabel, setMyLabel] = useState("Yo");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [island, setIsland] = useState<Island>({ kind: "hidden" });
@@ -104,6 +106,7 @@ export function App() {
   useEffect(() => {
     refresh().catch(showError);
     api.doctor().then(setDoctor);
+    api.getSettings().then((s) => setMyLabel(me(s)));
     api.islandState().then(setIsland);
   }, [refresh, showError]);
 
@@ -114,7 +117,10 @@ export function App() {
       onLibraryChanged(() => refresh()),
       onSelectCall((id) => refresh().then(() => setSelected(id))),
       // A model chosen or downloaded in the settings may fix (or break) the setup.
-      onSettingsChanged(() => api.doctor().then(setDoctor)),
+      onSettingsChanged(() => {
+        api.doctor().then(setDoctor);
+        api.getSettings().then((s) => setMyLabel(me(s)));
+      }),
       onDownload((e) => e.state === "done" && api.doctor().then(setDoctor)),
     ];
     return () => unlisteners.forEach((u) => void u.then((fn) => fn()));
@@ -179,7 +185,31 @@ export function App() {
       },
       "separator",
       { text: "Mostrar en Finder", action: () => api.getCall(call.id).then((d) => revealItemInDir(d.dir)) },
+      "separator",
+      {
+        text: "Trasladar a la papelera",
+        accelerator: "CmdOrCtrl+Backspace",
+        enabled: !busy(call),
+        action: () => trashCall(call),
+      },
     ]);
+
+  // What is being written into can not go.
+  const busy = (call: Call) => call.status.state === "recording" || call.status.state === "processing";
+
+  // Like the Finder: no confirmation, it can be taken back out of the Trash.
+  const trashCall = async (call: Call) => {
+    const index = visible.findIndex((c) => c.id === call.id);
+    const next = visible[index + 1] ?? visible[index - 1] ?? null;
+    try {
+      await api.trashCall(call.id);
+      if (selected === call.id) setSelected(next?.id ?? null);
+      await refresh();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
 
   const sortMenu = () =>
     popupMenu(
@@ -191,6 +221,18 @@ export function App() {
     );
 
   const current = calls.find((c) => c.id === selected) ?? null;
+
+  // ⌘⌫ trashes the open call, outside of text fields.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.key !== "Backspace" || !current || busy(current)) return;
+      if ((e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      e.preventDefault();
+      void trashCall(current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const searching = query.trim().length > 0;
   const recording = island.kind === "recording";
   const working = calls.filter((c) => c.status.state === "pending" || c.status.state === "processing").length;
@@ -280,6 +322,7 @@ export function App() {
           <CallView
             call={current}
             canDiarize={doctor?.diarization ?? false}
+            me={myLabel}
             progress={progress[current.id]}
             folders={folders}
             renameRequested={renaming === current.id}

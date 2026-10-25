@@ -14,6 +14,7 @@ use serde_json::json;
 use crate::engines::{AudioExtractor, Diarizer, Llm, MixInput, Progress, SpeakerTurn, TranscribeRequest, Transcriber};
 use crate::summary::{SUMMARY_JSON, SUMMARY_MD, Summary};
 use crate::transcript::{self, TRANSCRIPT_JSON, TRANSCRIPT_MD};
+use crate::voices::{self, MyVoice, Voices};
 use crate::{Call, Step, StepContext, Track, Transcript};
 
 const AUDIO_FILE: &str = "audio.wav";
@@ -114,9 +115,15 @@ impl Step for Transcribe {
 }
 
 /// Tells the voices in the call apart. An imported recording is one mix of everyone; a
-/// native one already knows "Yo" (the microphone), so only the other side is split.
+/// native one already knows the person using the app (the microphone), so only the other
+/// side is split. Each voice's fingerprint is kept, and the person using the app is
+/// recognized by theirs.
 pub struct Diarize {
     pub diarizer: Box<dyn Diarizer>,
+    /// The label of the person using the app.
+    pub me: String,
+    /// Their voice, once learnt.
+    pub my_voice: Option<MyVoice>,
 }
 
 /// What an unidentified voice is called, numbered in order of appearance.
@@ -129,15 +136,30 @@ impl Step for Diarize {
 
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
         let mut transcript = load_transcript(ctx.dir)?;
+        let microphone = call.tracks.iter().find(|t| t.role == TrackRole::Microphone);
         let tracks: Vec<&Track> = call.tracks.iter().filter(|t| t.role != TrackRole::Microphone).collect();
+
+        // Run again, it starts over: what is not the microphone goes back to its track's
+        // label. (Calls have one other track, so there is no doubt where a line came from.)
+        if let [track] = tracks.as_slice() {
+            let mine = microphone.and_then(|t| t.speaker.as_deref());
+            for segment in &mut transcript.segments {
+                if mine.is_none() || segment.speaker.as_deref() != mine {
+                    segment.speaker = track.speaker.clone();
+                }
+            }
+        }
+
+        let mut voices = Voices::new();
         let mut next_number = 1;
         for (i, track) in tracks.iter().enumerate() {
             let total = tracks.len() as f32;
-            let turns = self
+            let diarization = self
                 .diarizer
                 .diarize(&ctx.dir.join(track.wav()), &|f| ctx.progress((i as f32 + f) / total))
                 .with_context(|| format!("diarizing {}", track.file))?;
-            let shifted: Vec<SpeakerTurn> = turns
+            let shifted: Vec<SpeakerTurn> = diarization
+                .turns
                 .into_iter()
                 .map(|t| SpeakerTurn {
                     start_ms: t.start_ms + track.offset_ms,
@@ -145,8 +167,30 @@ impl Step for Diarize {
                     ..t
                 })
                 .collect();
-            next_number = assign_speakers(&mut transcript, track.speaker.as_deref(), &shifted, next_number);
+            let labels = assign_speakers(&mut transcript, track.speaker.as_deref(), &shifted, next_number);
+            next_number += labels.len();
+            for (voice, label) in labels {
+                if let Some(embedding) = diarization.voices.get(&voice) {
+                    voices.insert(label, embedding.clone());
+                }
+            }
         }
+
+        // Without a microphone track, the person using the app may be any of the voices.
+        if microphone.is_none()
+            && let Some(my_voice) = &self.my_voice
+            && !speakers(&transcript).contains(&self.me)
+        {
+            let anonymous = voices.iter().filter(|(label, _)| label.starts_with(SPEAKER_PREFIX));
+            if let Some(label) = my_voice.find(anonymous).map(str::to_string) {
+                rename_speaker(&mut transcript, &label, &self.me);
+                if let Some(voice) = voices.remove(&label) {
+                    voices.insert(self.me.clone(), voice);
+                }
+            }
+        }
+
+        voices::save(ctx.dir, &voices)?;
         save_transcript(ctx.dir, &call.title, &transcript)
     }
 }
@@ -154,15 +198,15 @@ impl Step for Diarize {
 /// Gives each segment that came from the track labelled `track_speaker` the voice it
 /// overlaps the most, named `Hablante 1`, `Hablante 2`... from `first_number` on, in
 /// order of appearance. A track where only one voice is heard keeps its label: one voice
-/// is no news. Returns the next free number.
+/// is no news. Returns the label each voice got (none if it kept its label).
 pub fn assign_speakers(
     transcript: &mut Transcript,
     track_speaker: Option<&str>,
     turns: &[SpeakerTurn],
     first_number: usize,
-) -> usize {
+) -> BTreeMap<String, String> {
     if turns.is_empty() {
-        return first_number;
+        return BTreeMap::new();
     }
     let from_track: Vec<usize> = (0..transcript.segments.len())
         .filter(|&i| transcript.segments[i].speaker.as_deref() == track_speaker)
@@ -182,12 +226,12 @@ pub fn assign_speakers(
         }
     }
     if names.len() < 2 {
-        return first_number;
+        return BTreeMap::new();
     }
     for (&i, voice) in from_track.iter().zip(&voices) {
         transcript.segments[i].speaker = Some(names[voice].clone());
     }
-    first_number + names.len()
+    names.into_iter().map(|(voice, label)| (voice.to_string(), label)).collect()
 }
 
 /// The voice that speaks the most within `start..end`, or the nearest one if none does.
@@ -210,6 +254,8 @@ fn dominant_voice(start: u64, end: u64, turns: &[SpeakerTurn]) -> &str {
 /// ("thanks, María"). Never guesses: a voice the call does not name keeps its number.
 pub struct NameSpeakers {
     pub llm: Box<dyn Llm>,
+    /// The label of the person using the app (who recorded the call).
+    pub me: String,
 }
 
 impl Step for NameSpeakers {
@@ -225,12 +271,16 @@ impl Step for NameSpeakers {
             return Ok(());
         }
 
-        let system = "You identify the speakers of a call transcript. Voices labelled like \
-            \"Hablante 1\" are anonymous; \"Yo\" is the person who recorded the call. For each \
-            anonymous label, give the person's name only when the transcript makes it clear: they \
-            introduce themselves, someone addresses them by name and they answer, or they are \
-            otherwise unmistakably identified. Otherwise answer null. Never guess, and never give \
-            two labels the same name. Use the name as it is said (first name is fine).";
+        let system = format!(
+            "You identify the speakers of a call transcript. Voices labelled like \"Hablante 1\" \
+             are anonymous; the call was recorded by {me}, who may be one of them (named {me} \
+             in the answer) unless already labelled so. For each anonymous label, give the \
+             person's name only when the transcript makes it clear: they introduce themselves, \
+             someone addresses them by name and they answer, or they are otherwise unmistakably \
+             identified. Otherwise answer null. Never guess, and never give two labels the same \
+             name. Use the name as it is said (first name is fine).",
+            me = self.me
+        );
         let prompt = format!("Labels to identify: {}\n\nTranscript:\n{}", unnamed.join(", "), dialogue(&transcript));
         let schema = json!({
             "type": "object",
@@ -257,7 +307,7 @@ impl Step for NameSpeakers {
             label: String,
             name: Option<String>,
         }
-        let answer: Answer = serde_json::from_value(self.llm.json(system, &prompt, &schema)?)
+        let answer: Answer = serde_json::from_value(self.llm.json(&system, &prompt, &schema)?)
             .context("the model answered with an unexpected format")?;
 
         let taken: Vec<String> = speakers(&transcript);
@@ -370,6 +420,8 @@ impl Step for RenderMarkdown {
 /// Summary, decisions and action items (`summary.json`, `summary.md`), by an LLM.
 pub struct Summarize {
     pub llm: Box<dyn Llm>,
+    /// The label of the person using the app (who recorded the call).
+    pub me: String,
     /// Language to write in, e.g. `español`, whatever the call's language.
     pub language: String,
     /// Names and terms as they are spelled, to fix what speech recognition misheard.
@@ -383,12 +435,13 @@ impl Summarize {
              Be concrete: names, numbers, dates and commitments as said in the call. Never add \
              anything that was not said. The transcript comes from speech recognition and may \
              contain misheard words: read them in context (a name spelled several ways is one person). \
-             When speakers are labeled, \"Yo\" is the person who recorded the call.\n\
+             When speakers are labeled, \"{me}\" is the person who recorded the call.\n\
              - summary: one to three short paragraphs: why the call happened, what was discussed, how it ended.\n\
              - decisions: what was agreed or decided. Empty if nothing was.\n\
              - action_items: next steps someone committed to or was asked to do. owner: the person \
              responsible as named in the call, or null. due: when, as said in the call, or null.",
-            language = self.language
+            language = self.language,
+            me = self.me
         );
         if !self.vocabulary.is_empty() {
             prompt.push_str(&format!(
@@ -475,8 +528,9 @@ mod tests {
         };
         // The second segment is mostly B; the last one overlaps nobody and goes to the nearest.
         let turns = [turn(0, 4500, "SPEAKER_01"), turn(4500, 9000, "SPEAKER_00"), turn(9000, 15000, "SPEAKER_01")];
-        let next = assign_speakers(&mut transcript, None, &turns, 1);
-        assert_eq!(next, 3);
+        let labels_of_voices = assign_speakers(&mut transcript, None, &turns, 1);
+        assert_eq!(labels_of_voices["SPEAKER_01"], "Hablante 1");
+        assert_eq!(labels_of_voices["SPEAKER_00"], "Hablante 2");
         assert_eq!(
             labels(&transcript),
             [Some("Hablante 1"), Some("Hablante 2"), Some("Hablante 1"), Some("Hablante 1")]
@@ -490,7 +544,7 @@ mod tests {
             segments: vec![seg(0, 1000, Some("Yo")), seg(1000, 2000, Some("Ellos")), seg(2000, 3000, Some("Ellos"))],
         };
         let one_voice = [turn(1000, 3000, "SPEAKER_00")];
-        assert_eq!(assign_speakers(&mut transcript, Some("Ellos"), &one_voice, 1), 1);
+        assert!(assign_speakers(&mut transcript, Some("Ellos"), &one_voice, 1).is_empty());
         assert_eq!(labels(&transcript), [Some("Yo"), Some("Ellos"), Some("Ellos")]);
 
         let two_voices = [turn(1000, 2000, "SPEAKER_00"), turn(2000, 3000, "SPEAKER_01")];

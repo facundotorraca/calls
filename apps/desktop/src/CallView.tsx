@@ -15,6 +15,8 @@ interface Props {
   call: Call;
   /** Diarization is on and its model downloaded: offer it for calls processed without it. */
   canDiarize: boolean;
+  /** The speaker label of the person using the app. */
+  me: string;
   progress?: ProgressMap[string];
   folders: Folder[];
   /** Switch the title to editing ("Renombrar" in the sidebar), then call `onRenameStarted`. */
@@ -27,6 +29,7 @@ interface Props {
 export function CallView({
   call,
   canDiarize,
+  me,
   progress,
   folders,
   renameRequested,
@@ -117,7 +120,7 @@ export function CallView({
         </>
       ),
       content: (
-        <TranscriptView transcript={transcript} active={playing} onSeek={seek} onRenameSpeaker={renameSpeaker} />
+        <TranscriptView transcript={transcript} active={playing} onSeek={seek} onRenameSpeaker={renameSpeaker} me={me} />
       ),
     });
   }

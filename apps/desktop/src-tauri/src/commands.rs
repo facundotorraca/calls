@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use calls_core::steps::{self, PLAYBACK_FILE};
 use calls_core::summary::Summary;
+use calls_core::voices::MyVoice;
 use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};
 use calls_engines::models::{self, LocalModel, ModelKind};
 use calls_engines::ollama::{self, InstalledModel};
@@ -82,6 +83,12 @@ pub async fn rename_call(state: State<'_, AppState>, id: CallId, title: String) 
 #[tauri::command]
 pub async fn move_call(state: State<'_, AppState>, id: CallId, folder: Option<String>) -> CmdResult<Call> {
     state.library.move_to(&id, folder.as_deref()).map_err(to_string)
+}
+
+/// Moves a call to the Trash.
+#[tauri::command]
+pub async fn trash_call(state: State<'_, AppState>, id: CallId) -> CmdResult<()> {
+    state.library.remove(&id, calls_engines::trash::move_to_trash).map_err(to_string)
 }
 
 #[tauri::command]
@@ -217,9 +224,32 @@ pub async fn diarization_ready() -> CmdResult<bool> {
     Ok(pyannote::is_downloaded())
 }
 
+/// Renames a speaker of a call. Naming one as the person using the app ("soy yo") also
+/// teaches the app their voice, to recognize them in the next calls.
 #[tauri::command]
 pub async fn rename_speaker(state: State<'_, AppState>, id: CallId, from: String, to: String) -> CmdResult<()> {
-    state.library.rename_speaker(&id, &from, &to).map_err(to_string)
+    let voice = state.library.voice(&id, &from);
+    // You can be split in two voices: each "soy yo" adds one more to yours.
+    let is_me = to.trim() == state.settings().me();
+    state.library.rename_speaker(&id, &from, &to, is_me).map_err(to_string)?;
+    if is_me && let Some(voice) = voice {
+        MyVoice::learn(&settings::my_voice_path(), &voice).map_err(to_string)?;
+    }
+    Ok(())
+}
+
+/// How many voices the app learnt the user's from; none if it has not.
+#[tauri::command]
+pub async fn my_voice() -> CmdResult<Option<u32>> {
+    Ok(MyVoice::load(&settings::my_voice_path()).map(|v| v.samples))
+}
+
+#[tauri::command]
+pub async fn forget_my_voice() -> CmdResult<()> {
+    match std::fs::remove_file(settings::my_voice_path()) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]

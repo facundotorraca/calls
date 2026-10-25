@@ -4,9 +4,8 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use calls_core::engines::{Diarizer, Progress, SpeakerTurn};
+use calls_core::engines::{Diarization, Diarizer, Progress};
 use calls_core::settings;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::python::PythonWorker;
@@ -48,12 +47,7 @@ impl Pyannote {
 }
 
 impl Diarizer for Pyannote {
-    fn diarize(&self, audio: &std::path::Path, progress: Progress) -> Result<Vec<SpeakerTurn>> {
-        #[derive(Deserialize)]
-        struct Output {
-            turns: Vec<SpeakerTurn>,
-        }
-        let output: Output = self.worker.run(&json!({ "audio": audio }), progress)?;
-        Ok(output.turns)
+    fn diarize(&self, audio: &std::path::Path, progress: Progress) -> Result<Diarization> {
+        self.worker.run(&json!({ "audio": audio }), progress)
     }
 }

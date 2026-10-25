@@ -279,7 +279,7 @@ impl Library {
 
     /// Creates the call a native recording writes into: your mic and the other side as separate
     /// tracks. File names are part of the protocol with the audio sidecar.
-    pub fn create_recording(&self, title: &str) -> Result<Call> {
+    pub fn create_recording(&self, title: &str, me: &str) -> Result<Call> {
         let created_at = Local::now();
         let call = Call {
             id: self.unique_id(&format!("{}_{}", created_at.format("%Y-%m-%d_%H%M"), slug(title))),
@@ -289,7 +289,7 @@ impl Library {
             source: None,
             duration_ms: None,
             tracks: vec![
-                Track { file: "mic.m4a".into(), speaker: Some("Yo".into()), role: TrackRole::Microphone, offset_ms: 0 },
+                Track { file: "mic.m4a".into(), speaker: Some(me.into()), role: TrackRole::Microphone, offset_ms: 0 },
                 Track {
                     file: "system.m4a".into(),
                     speaker: Some("Ellos".into()),
@@ -312,8 +312,9 @@ impl Library {
         Ok(Some(serde_json::from_str(&fs::read_to_string(path)?)?))
     }
 
-    /// Renames a speaker throughout a call's transcript ("Hablante 2" -> "María").
-    pub fn rename_speaker(&self, id: &CallId, from: &str, to: &str) -> Result<()> {
+    /// Renames a speaker throughout a call's transcript ("Hablante 2" -> "María"). Into a
+    /// name another speaker has, only with `merge` (two voices that turned out to be one).
+    pub fn rename_speaker(&self, id: &CallId, from: &str, to: &str, merge: bool) -> Result<()> {
         let to = to.trim();
         if to.is_empty() {
             bail!("the name can not be empty");
@@ -321,11 +322,30 @@ impl Library {
         let _guard = self.lock();
         let call = self.load(id)?;
         let mut transcript = self.transcript(id)?.context("the call has no transcript")?;
-        if from != to && crate::steps::speakers(&transcript).iter().any(|s| s == to) {
+        if !merge && from != to && crate::steps::speakers(&transcript).iter().any(|s| s == to) {
             bail!("there is already a speaker named {to}");
         }
         crate::steps::rename_speaker(&mut transcript, from, to);
+        crate::voices::rename(&self.dir(id), from, to)?;
         crate::steps::save_transcript(&self.dir(id), &call.title, &transcript)
+    }
+
+    /// Removes a call, its folder and everything in it, with `remove` (the front end's way
+    /// to the Trash). Not while it records or processes: something is writing into it.
+    pub fn remove(&self, id: &CallId, remove: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+        let _guard = self.lock();
+        let call = self.load(id)?;
+        match call.status {
+            Status::Recording => bail!("the call is being recorded: stop it first"),
+            Status::Processing { .. } => bail!("the call is being processed: wait for it to finish"),
+            _ => {}
+        }
+        remove(&self.dir(id))
+    }
+
+    /// The fingerprint of a speaker's voice in a call, if diarization took it.
+    pub fn voice(&self, id: &CallId, speaker: &str) -> Option<Vec<f32>> {
+        crate::voices::load(&self.dir(id)).remove(speaker)
     }
 
     fn unique_id(&self, base: &str) -> CallId {
@@ -405,6 +425,24 @@ mod tests {
         assert_ne!(a.id, b.id);
         assert!(a.id.0.ends_with("_kickoff-acme"));
         assert_eq!(library.list().unwrap().len(), 2);
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn removes_calls_but_not_while_processing() {
+        let tmp = std::env::temp_dir().join(format!("calls-test-remove-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("a.mkv"), b"x").unwrap();
+        fs::write(tmp.join("b.mkv"), b"x").unwrap();
+        let a = library.import(&tmp.join("a.mkv")).unwrap();
+        let b = library.import(&tmp.join("b.mkv")).unwrap();
+        let remove = |dir: &Path| Ok(fs::remove_dir_all(dir)?);
+
+        library.update(&b.id, |call| call.status = Status::Processing { step: "transcribe".into() }).unwrap();
+        assert!(library.remove(&b.id, remove).is_err());
+
+        library.remove(&a.id, remove).unwrap();
+        assert_eq!(library.list().unwrap().iter().map(|c| &c.id).collect::<Vec<_>>(), [&b.id]);
         fs::remove_dir_all(tmp).unwrap();
     }
 

@@ -1,6 +1,7 @@
 //! Contracts for the heavy lifting. Implementations live outside the core
 //! (see the `calls-engines` crate), so any of them can be swapped without touching steps.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -49,10 +50,19 @@ pub struct SpeakerTurn {
     pub speaker: String,
 }
 
+/// Who spoke when, and what each voice sounds like.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Diarization {
+    pub turns: Vec<SpeakerTurn>,
+    /// A fingerprint (embedding) per speaker of `turns`, to recognize them elsewhere.
+    #[serde(default)]
+    pub voices: BTreeMap<String, Vec<f32>>,
+}
+
 /// Tells voices apart: who spoke when, without knowing who they are.
 pub trait Diarizer: Send + Sync {
     /// Takes a 16 kHz mono WAV, like the transcriber.
-    fn diarize(&self, audio: &Path, progress: Progress) -> Result<Vec<SpeakerTurn>>;
+    fn diarize(&self, audio: &Path, progress: Progress) -> Result<Diarization>;
 }
 
 /// A language model, local or remote.

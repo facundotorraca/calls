@@ -12,9 +12,11 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::engines::{AudioExtractor, Diarizer, Llm, MixInput, Progress, SpeakerTurn, TranscribeRequest, Transcriber};
+use crate::notes::Notes;
 use crate::summary::{SUMMARY_JSON, SUMMARY_MD, Summary};
 use crate::transcript::{self, TRANSCRIPT_JSON, TRANSCRIPT_MD};
 use crate::voices::{self, MyVoice, Voices};
+use crate::pipeline::Postponed;
 use crate::{Call, Step, StepContext, Track, Transcript};
 
 const AUDIO_FILE: &str = "audio.wav";
@@ -48,17 +50,32 @@ impl Step for ExtractAudio {
             bail!("the recording has no audio");
         }
         let total = call.tracks.len() as f32;
+        let mut silent = Vec::new();
         for (i, track) in call.tracks.iter().enumerate() {
+            let wav = ctx.dir.join(track.wav());
             let info = self
                 .extractor
-                .extract(&ctx.dir.join(&track.file), &ctx.dir.join(track.wav()), &|f| {
-                    ctx.progress((i as f32 + f) / total)
-                })
+                .extract(&ctx.dir.join(&track.file), &wav, &|f| ctx.progress((i as f32 + f) / total))
                 .with_context(|| format!("reading {}", track.file))?;
             call.duration_ms = call.duration_ms.max(info.duration_ms);
+            if !has_audio(&wav) {
+                silent.push(track.file.clone());
+            }
+        }
+        // A side that never made a sound (nothing played on the Mac while recording) leaves
+        // a file without audio, which the transcriber cannot read: the call goes on without it.
+        call.tracks.retain(|t| !silent.contains(&t.file));
+        if call.tracks.is_empty() {
+            bail!("the recording has no audio");
         }
         Ok(())
     }
+}
+
+/// Whether a WAV the extractor wrote has any sound in it: more than its header and a few
+/// milliseconds (at 16 kHz, 16-bit mono, 1000 bytes are ~30 ms).
+fn has_audio(wav: &Path) -> bool {
+    fs::metadata(wav).is_ok_and(|m| m.len() > 1000)
 }
 
 /// Transcribes every track and interleaves the results into `transcript.json`.
@@ -250,6 +267,16 @@ fn dominant_voice(start: u64, end: u64, turns: &[SpeakerTurn]) -> &str {
     &turns.iter().min_by_key(|t| distance(t)).expect("turns is not empty").speaker
 }
 
+/// A local model takes GBs: loading it while the computer is busy (right after a call,
+/// with everything still open) makes macOS run out of memory. Then the step is left for
+/// the user to run when they want; asked by them, it runs anyway.
+fn ensure_memory(llm: &dyn Llm, ctx: &StepContext) -> Result<()> {
+    if !ctx.on_demand && llm.memory_shortage().is_some() {
+        return Err(Postponed("not enough free memory for the model").into());
+    }
+    Ok(())
+}
+
 /// Puts names on the voices `Diarize` numbered, when the call itself says who they are
 /// ("thanks, María"). Never guesses: a voice the call does not name keeps its number.
 pub struct NameSpeakers {
@@ -296,6 +323,7 @@ impl Step for NameSpeakers {
             },
             "required": ["speakers"]
         });
+        ensure_memory(self.llm.as_ref(), ctx)?;
         ctx.progress(0.1);
 
         #[derive(Deserialize)]
@@ -465,12 +493,21 @@ impl Step for Summarize {
             bail!("the transcript is empty");
         }
 
-        let prompt = format!(
+        let mut prompt = format!(
             "Call: {}\nDate: {}\n\nTranscript:\n{}",
             call.title,
             call.created_at.format("%Y-%m-%d %H:%M"),
             dialogue(&transcript)
         );
+        // What they wrote says what mattered to them; the transcript says what was said.
+        if let Some(notes) = Notes::load(&ctx.dir)?.to_prompt() {
+            prompt.push_str(&format!(
+                "\n\nNotes {me} took about the call. Give weight to what they point at, but state \
+                 only what the transcript supports; timestamps match the transcript's:\n{notes}",
+                me = self.me
+            ));
+        }
+        ensure_memory(self.llm.as_ref(), ctx)?;
         ctx.progress(0.1);
         let answer = self.llm.json(&self.system_prompt(), &prompt, &Summary::schema())?;
         let summary: Summary =
@@ -518,6 +555,44 @@ mod tests {
 
     fn labels(transcript: &Transcript) -> Vec<Option<&str>> {
         transcript.segments.iter().map(|s| s.speaker.as_deref()).collect()
+    }
+
+    /// Writes each track's WAV with as many bytes as its name says ("mic-5000.m4a").
+    struct FakeExtractor;
+
+    impl AudioExtractor for FakeExtractor {
+        fn extract(&self, input: &Path, output: &Path, _: Progress) -> Result<crate::engines::AudioInfo> {
+            let stem = input.file_stem().unwrap().to_string_lossy().to_string();
+            let bytes: usize = stem.rsplit('-').next().unwrap().parse().unwrap();
+            fs::write(output, vec![0u8; bytes])?;
+            Ok(crate::engines::AudioInfo { duration_ms: Some(bytes as u64 / 32) })
+        }
+
+        fn mix(&self, _: &[MixInput], _: &Path, _: Progress) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_side_without_sound_is_left_out() {
+        let tmp = std::env::temp_dir().join(format!("calls-silent-{}", std::process::id()));
+        let library = crate::Library::open(tmp.clone()).unwrap();
+        let mut call = library.create_recording("x", "Yo").unwrap();
+        let track = |file: &str, role| Track { file: file.into(), speaker: None, role, offset_ms: 0 };
+        call.tracks = vec![track("mic-64000.m4a", TrackRole::Microphone), track("system-78.m4a", TrackRole::System)];
+        library.save(&call).unwrap();
+
+        let pipeline = crate::Pipeline::new().with(ExtractAudio { extractor: Box::new(FakeExtractor) });
+        pipeline.run(&library, &call.id, false, &|_| {}).unwrap();
+        let tracks: Vec<String> = library.load(&call.id).unwrap().tracks.into_iter().map(|t| t.file).collect();
+        assert_eq!(tracks, ["mic-64000.m4a"]);
+
+        // With no sound at all, there is nothing to process.
+        let mut call = library.create_recording("y", "Yo").unwrap();
+        call.tracks = vec![track("system-78.m4a", TrackRole::System)];
+        library.save(&call).unwrap();
+        assert!(pipeline.run(&library, &call.id, false, &|_| {}).is_err());
+        fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

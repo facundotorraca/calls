@@ -26,7 +26,7 @@
         "url": "index.html",
         "title": "Calls",
         "width": 360,
-        "height": 64,
+        "height": 40,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

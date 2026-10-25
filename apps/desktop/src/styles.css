@@ -1990,6 +1990,354 @@ code {
   }
 }
 
+/* ── Notes: the user's own words on a call ────────────────────────── */
+
+.notes-text {
+  display: block;
+  width: 100%;
+  min-height: 132px;
+  padding: 12px 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  resize: none;
+  transition: border-color 120ms linear;
+}
+
+.notes-text:hover {
+  border-color: var(--muted-foreground);
+}
+
+.notes-text:focus {
+  border-color: var(--foreground);
+}
+
+.notes-text::placeholder {
+  color: var(--faint);
+}
+
+.notes-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.marks {
+  margin-top: 32px;
+}
+
+.marks-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.marks-rail .count {
+  margin-left: 8px;
+}
+
+/* A moment, as a small square of ink: the user's own, never a status colour. */
+.mark-square {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.marks-empty {
+  padding: 14px 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.mark-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mark-row {
+  display: grid;
+  grid-template-columns: 84px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 0 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mark-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mark-time:not(:disabled):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.mark-input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14px;
+}
+
+.mark-input:hover {
+  border-color: var(--border);
+}
+
+.mark-input:focus {
+  border-color: var(--foreground);
+  background: var(--background);
+}
+
+.mark-input::placeholder {
+  color: var(--faint);
+}
+
+.mark-remove {
+  justify-content: center;
+  width: 24px;
+  padding: 0;
+  font-size: 15px;
+  opacity: 0;
+}
+
+.mark-row:hover .mark-remove,
+.mark-remove:focus-visible {
+  opacity: 1;
+}
+
+/* In the transcript, a moment sits on the line it was marked at, a rule running out of it. */
+.turn-mark {
+  align-items: center;
+  margin-block: -6px;
+}
+
+.turn-mark .turn-time {
+  padding: 0;
+  color: var(--foreground);
+}
+
+.turn-mark-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 13.5px;
+}
+
+.turn-mark-body .tech-label {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.turn-mark-body::after {
+  content: "";
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Search ─────────────────────────────────────────────────────────── */
+
+/* The words found: a highlighter's stroke in the palette's yellow. */
+mark.hl {
+  background: color-mix(in oklch, var(--yellow) 26%, transparent);
+  box-shadow: inset 0 -1px color-mix(in oklch, var(--yellow) 70%, transparent);
+  color: inherit;
+}
+
+/* Where a search result lands: a wash that fades once. */
+.flash {
+  animation: flash 1800ms var(--ease-out-expo);
+}
+
+@keyframes flash {
+  from {
+    background: color-mix(in oklch, var(--foreground) 22%, transparent);
+  }
+}
+
+.search-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-body {
+  gap: 30px;
+}
+
+.result-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 0 0 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.result-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-folder[data-color] {
+  color: var(--tint);
+}
+
+.result-folder .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.result-title {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.result-head:hover .result-title {
+  text-decoration: underline;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 4px;
+}
+
+.hits {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.hit {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 16px;
+  width: 100%;
+  padding: 10px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  transition: background-color 120ms linear;
+}
+
+.hit:hover {
+  background: var(--accent);
+}
+
+.hit-kind {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 2px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.hit-kind[data-kind="task"] {
+  color: var(--pending);
+}
+
+.hit-kind[data-kind="decision"] {
+  color: var(--settled);
+}
+
+.hit-kind[data-kind="notes"],
+.hit-kind[data-kind="mark"] {
+  color: var(--foreground);
+}
+
+.hit-time {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.hit-text {
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.hit-text mark.hl {
+  color: var(--foreground);
+}
+
+.hit-speaker {
+  margin-right: 8px;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.hit-empty {
+  color: var(--faint);
+}
+
+.result-more {
+  margin: 6px 0 0 -8px;
+}
+
+@container (max-width: 560px) {
+  .hit {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* ── Tabs ───────────────────────────────────────────────────────────── */
 
 /* Sticky and translucent: the text travels under it. */
@@ -2624,18 +2972,21 @@ html.island-window body {
 }
 
 .island {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: fit-content;
+  gap: 12px;
+  width: max-content;
   height: 40px;
-  margin: 8px auto 0;
   padding: 0 6px 0 14px;
   border: 1px solid var(--border);
   background: var(--background);
   color: var(--foreground);
   font-size: 13px;
   white-space: nowrap;
+  cursor: grab;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -2644,41 +2995,69 @@ html.island-window body {
   display: none;
 }
 
-.island-text {
+.island:active {
+  cursor: grabbing;
+}
+
+.island.folded {
+  gap: 10px;
+  padding-left: 12px;
+}
+
+.island-label {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+.island-faint {
+  color: var(--muted-foreground);
+}
+
+.island-title {
+  display: inline-block;
+  max-width: 22ch;
+  margin-left: 10px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
 .island-timer {
+  min-width: 5ch;
   font-family: var(--font-dot);
   font-size: 20px;
   font-weight: 900;
-  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
-.island-dot {
+/* The state, as one square: the same language as the rest of the app. */
+.island-mark {
   width: 8px;
   height: 8px;
   flex-shrink: 0;
 }
 
-.island-dot.idle {
+.island-mark.idle {
   border: 1px solid var(--foreground);
 }
 
-.island-dot.live {
+.island-mark.live {
   background: var(--signal);
   animation: signal-pulse 2.4s ease-out infinite;
 }
 
-.island-dot.ok {
+.island-mark.ok {
   background: var(--settled);
 }
 
-.island-dot.failed {
+.island-mark.failed {
   background: var(--destructive);
 }
 
@@ -2691,57 +3070,163 @@ html.island-window body {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  cursor: default;
 }
 
 .island-button:hover {
   background: var(--muted);
 }
 
-.island-button.record {
+.island-button.primary {
   border-color: var(--foreground);
   background: var(--foreground);
   color: var(--background);
 }
 
-.island-button.record:hover {
+.island-button.primary:hover {
   background: color-mix(in oklch, var(--foreground) 82%, transparent);
 }
 
-.island-close {
+.island-icon {
+  display: grid;
+  place-items: center;
   width: 26px;
   height: 26px;
+  margin-left: -6px;
   border: 0;
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 16px;
-  line-height: 1;
+  cursor: default;
 }
 
-.island-close:hover {
+.island-icon:hover {
   background: var(--muted);
   color: var(--foreground);
 }
 
-.island-meters {
+/* Sound as dots: you grow up from the middle line, them down from it. */
+.island-wave {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 16px;
+  flex-direction: column;
+  gap: 1px;
 }
 
-.island-meter {
+.island-wave-half {
   display: flex;
+  gap: 1px;
+  height: 11px;
+}
+
+.island-wave-half.mic {
   align-items: flex-end;
-  width: 3px;
-  height: 100%;
-  overflow: hidden;
+}
+
+.island-wave-half.system {
+  align-items: flex-start;
+}
+
+.island-wave-half > span {
+  width: 2px;
+  height: calc(var(--dots) * 3px - 1px);
+  background: repeating-linear-gradient(to bottom, var(--tint) 0 2px, transparent 2px 3px);
+}
+
+.island-wave-half.mic > span {
+  --tint: var(--foreground);
+  background-position: bottom;
+}
+
+.island-wave-half.system > span {
+  --tint: var(--muted-foreground);
+}
+
+/* ── Upright: everything stacked, for the side of the screen ─────────── */
+
+.island.vertical {
+  flex-direction: column;
+  gap: 10px;
+  width: 116px;
+  height: auto;
+  padding: 12px 8px 8px;
+  white-space: normal;
+  text-align: center;
+}
+
+.island.vertical.folded {
+  width: auto;
+  padding: 10px 6px 4px;
+}
+
+.island.vertical .island-icon {
+  margin: -4px 0 0;
+}
+
+.island.vertical .island-button {
+  width: 100%;
+  height: auto;
+  min-height: 26px;
+  padding: 5px 4px;
+  letter-spacing: 0.06em;
+}
+
+.island.vertical .island-title {
+  display: block;
+  max-width: none;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.island.vertical .island-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+}
+
+.island.vertical .island-label .island-faint {
+  display: block;
+}
+
+.island.vertical .island-spinner {
+  margin: 0 12px 0 0;
+}
+
+.island.vertical .island-wave {
+  flex-direction: row;
+}
+
+.island.vertical .island-wave-half {
+  flex-direction: column;
+  width: 11px;
+  height: auto;
+}
+
+.island.vertical .island-wave-half > span {
+  width: calc(var(--dots) * 3px - 1px);
+  height: 2px;
+  background: repeating-linear-gradient(to right, var(--tint) 0 2px, transparent 2px 3px);
+}
+
+.island.vertical .island-progress {
+  width: 100%;
+}
+
+.island-progress {
+  width: 64px;
+  height: 4px;
   background: var(--accent);
 }
 
-.island-meter > span {
-  width: 100%;
+.island-progress > span {
+  display: block;
+  height: 100%;
   background: var(--foreground);
-  transition: height 100ms linear;
+  transition: width 200ms linear;
+}
+
+.island-percent {
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2753,12 +3238,13 @@ html.island-window body {
   .sweep-rule,
   .stat-figure,
   .lane-in,
+  .flash,
   .folder-row-bar > span {
     animation: none;
   }
 
   .signal-square,
-  .island-dot.live,
+  .island-mark.live,
   .spinner,
   .island-spinner,
   .spinning {

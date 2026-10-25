@@ -3,10 +3,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::bail;
 use calls_core::notion::{Destination, NotionPage, Synced, destination};
 use calls_core::steps::{self, PLAYBACK_FILE};
+use calls_core::notes::Notes;
+use calls_core::search::{self, SearchResult};
 use calls_core::summary::Summary;
 use calls_core::voices::MyVoice;
 use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};
@@ -71,6 +74,73 @@ pub async fn summaries(state: State<'_, AppState>) -> CmdResult<HashMap<CallId, 
     Ok(summaries)
 }
 
+/// Event telling the windows a call's notes changed, with its id: a moment marked from the
+/// island shows up in the open call.
+const NOTES_EVENT: &str = "notes_changed";
+
+#[tauri::command]
+pub async fn get_notes(state: State<'_, AppState>, id: CallId) -> CmdResult<Notes> {
+    state.library.notes(&id).map_err(to_string)
+}
+
+/// Saves the free text only, so typing never undoes a moment marked meanwhile.
+#[tauri::command]
+pub async fn save_notes_text(state: State<'_, AppState>, id: CallId, text: String) -> CmdResult<()> {
+    state.library.update_notes(&id, |notes| notes.text = text).map_err(to_string)?;
+    Ok(())
+}
+
+/// Marks a moment. Without `id` and `at_ms`, now in the call being recorded.
+#[tauri::command]
+pub async fn add_mark(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: Option<CallId>,
+    at_ms: Option<u64>,
+) -> CmdResult<Notes> {
+    let (id, at_ms) = match (id, at_ms) {
+        (Some(id), Some(at_ms)) => (id, at_ms),
+        (id, None) => match state.recorder.island() {
+            Island::Recording { call_id, started_at_ms, .. } if id.as_ref().is_none_or(|id| *id == call_id) => {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                (call_id, now.saturating_sub(started_at_ms))
+            }
+            _ => return Err("No se está grabando esta llamada".into()),
+        },
+        (None, Some(_)) => return Err("Falta la llamada".into()),
+    };
+    let notes = state.library.add_mark(&id, at_ms).map_err(to_string)?;
+    let _ = app.emit(NOTES_EVENT, &id);
+    Ok(notes)
+}
+
+/// Writes the line of the moment at `at_ms`, or removes the moment with `None`.
+#[tauri::command]
+pub async fn set_mark(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: CallId,
+    at_ms: u64,
+    text: Option<String>,
+) -> CmdResult<Notes> {
+    let notes = state
+        .library
+        .update_notes(&id, |notes| match text {
+            Some(text) => notes.marks.iter_mut().filter(|m| m.at_ms == at_ms).for_each(|m| m.text = text.clone()),
+            None => notes.marks.retain(|m| m.at_ms != at_ms),
+        })
+        .map_err(to_string)?;
+    let _ = app.emit(NOTES_EVENT, &id);
+    Ok(notes)
+}
+
+/// The calls with every word of `query` in their title, summary, notes or transcript.
+#[tauri::command]
+pub async fn search(state: State<'_, AppState>, query: String) -> CmdResult<Vec<SearchResult>> {
+    let library = state.library.clone();
+    blocking(move || search::search(&library, &query)).await
+}
+
 /// Registers the files as calls and queues them for processing.
 #[tauri::command]
 pub async fn import_files(state: State<'_, AppState>, paths: Vec<PathBuf>) -> CmdResult<Vec<Call>> {
@@ -87,7 +157,7 @@ pub async fn import_files(state: State<'_, AppState>, paths: Vec<PathBuf>) -> Cm
 #[tauri::command]
 pub async fn process_call(state: State<'_, AppState>, id: CallId) -> CmdResult<()> {
     state.library.update(&id, |call| call.status = Status::Pending).map_err(to_string)?;
-    state.queue.push(id);
+    state.queue.push_on_demand(id);
     Ok(())
 }
 
@@ -400,6 +470,19 @@ pub async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> CmdR
 #[tauri::command]
 pub async fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     state.recorder.stop(&app);
+    Ok(())
+}
+
+/// The island fits its window to what it shows.
+#[tauri::command]
+pub async fn island_resize(app: AppHandle, width: f64, height: f64) -> CmdResult<()> {
+    crate::island::resize(&app, width, height);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn island_reset_place(app: AppHandle) -> CmdResult<()> {
+    crate::island::reset_place(&app);
     Ok(())
 }
 

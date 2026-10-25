@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::Path;
 
 use anyhow::Result;
@@ -20,6 +21,9 @@ pub trait Step: Send + Sync {
 pub struct StepContext<'a> {
     /// The call's folder, where steps read and write their files.
     pub dir: &'a Path,
+    /// The user asked for this run (rather than a call that just ended or was imported):
+    /// heavy steps run even if the computer is busy.
+    pub on_demand: bool,
     progress: &'a dyn Fn(f32),
 }
 
@@ -29,12 +33,27 @@ impl StepContext<'_> {
     }
 }
 
+/// What a step fails with to be left for later: it is not done, but the call goes on
+/// without it, and runs it when processed again on demand.
+#[derive(Debug)]
+pub struct Postponed(pub &'static str);
+
+impl fmt::Display for Postponed {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "postponed: {}", self.0)
+    }
+}
+
+impl std::error::Error for Postponed {}
+
 /// What the pipeline reports while it runs, so front ends can show progress.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Event {
     StepStarted { call_id: CallId, step: String },
     StepProgress { call_id: CallId, step: String, fraction: f32 },
+    /// Left for later (see [`Postponed`]); the call is processed without it.
+    StepPostponed { call_id: CallId, step: String },
     StepFinished { call_id: CallId, step: String },
     Finished { call_id: CallId },
     Failed { call_id: CallId, step: String, error: String },
@@ -60,7 +79,7 @@ impl Pipeline {
     }
 
     /// Runs every step not yet completed for this call, saving state after each one.
-    pub fn run(&self, library: &Library, id: &CallId, emit: &dyn Fn(Event)) -> Result<()> {
+    pub fn run(&self, library: &Library, id: &CallId, on_demand: bool, emit: &dyn Fn(Event)) -> Result<()> {
         let mut call = library.load(id)?;
         let dir = library.dir(id);
 
@@ -75,9 +94,13 @@ impl Pipeline {
             emit(Event::StepStarted { call_id: id.clone(), step: step_id.into() });
 
             let progress = |fraction| emit(Event::StepProgress { call_id: id.clone(), step: step_id.into(), fraction });
-            let ctx = StepContext { dir: &dir, progress: &progress };
+            let ctx = StepContext { dir: &dir, on_demand, progress: &progress };
 
             if let Err(e) = step.run(&mut call, &ctx) {
+                if e.is::<Postponed>() {
+                    emit(Event::StepPostponed { call_id: id.clone(), step: step_id.into() });
+                    continue;
+                }
                 let error = format!("{e:#}");
                 call.status = Status::Failed { step: step_id.into(), error: error.clone() };
                 library.save_progress(&mut call)?;
@@ -137,17 +160,54 @@ mod tests {
         let events = Mutex::new(Vec::new());
         let emit = |e: Event| events.lock().unwrap().push(e);
 
-        assert!(pipeline.run(&library, &call.id, &emit).is_err());
+        assert!(pipeline.run(&library, &call.id, false, &emit).is_err());
         assert!(matches!(library.load(&call.id).unwrap().status, Status::Failed { .. }));
 
-        pipeline.run(&library, &call.id, &emit).unwrap();
+        pipeline.run(&library, &call.id, false, &emit).unwrap();
         assert_eq!(library.load(&call.id).unwrap().status, Status::Ready);
 
         // Already completed: a third run does not execute the step again.
         events.lock().unwrap().clear();
-        pipeline.run(&library, &call.id, &emit).unwrap();
+        pipeline.run(&library, &call.id, false, &emit).unwrap();
         assert!(matches!(events.lock().unwrap().as_slice(), [Event::Finished { .. }]));
 
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    /// Runs only when asked for.
+    struct Heavy;
+
+    impl Step for Heavy {
+        fn id(&self) -> &'static str {
+            "heavy"
+        }
+
+        fn run(&self, _: &mut Call, ctx: &StepContext) -> Result<()> {
+            if !ctx.on_demand {
+                return Err(Postponed("busy").into());
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn postponed_steps_wait_for_the_user() {
+        let tmp = std::env::temp_dir().join(format!("calls-pipeline-postponed-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("call.mkv"), b"x").unwrap();
+        let call = library.import(&tmp.join("call.mkv")).unwrap();
+        let pipeline =
+            Pipeline::new().with(Heavy).with(Flaky { runs: AtomicUsize::new(0), fail_first: false });
+
+        // The call is ready without it, and the steps after it still ran.
+        pipeline.run(&library, &call.id, false, &|_| {}).unwrap();
+        let processed = library.load(&call.id).unwrap();
+        assert_eq!(processed.status, Status::Ready);
+        assert!(!processed.completed_steps.contains_key("heavy"));
+        assert!(processed.completed_steps.contains_key("flaky"));
+
+        pipeline.run(&library, &call.id, true, &|_| {}).unwrap();
+        assert!(library.load(&call.id).unwrap().completed_steps.contains_key("heavy"));
         fs::remove_dir_all(tmp).unwrap();
     }
 }

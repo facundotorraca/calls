@@ -1,7 +1,9 @@
 import type { Summary } from "./api";
 import { CalendarIcon, CheckCircleIcon, PersonIcon } from "./icons";
+import { Highlight } from "./Search";
 
-export function SummaryView({ summary }: { summary: Summary }) {
+/** `highlight`: words of a search to mark. */
+export function SummaryView({ summary, highlight }: { summary: Summary; highlight?: string[] }) {
   return (
     <div className="summary">
       <div className="summary-text">
@@ -9,7 +11,9 @@ export function SummaryView({ summary }: { summary: Summary }) {
           .split("\n")
           .filter(Boolean)
           .map((paragraph, i) => (
-            <p key={i}>{paragraph}</p>
+            <p key={i}>
+              <Highlight text={paragraph} words={highlight} />
+            </p>
           ))}
       </div>
 
@@ -22,7 +26,9 @@ export function SummaryView({ summary }: { summary: Summary }) {
             {summary.decisions.map((decision, i) => (
               <li key={i} className="row-tick">
                 <CheckCircleIcon />
-                <span>{decision}</span>
+                <span>
+                  <Highlight text={decision} words={highlight} />
+                </span>
               </li>
             ))}
           </ul>
@@ -39,7 +45,9 @@ export function SummaryView({ summary }: { summary: Summary }) {
               <li key={i} className="row-tick">
                 <span className="todo-box" />
                 <div>
-                  <p>{item.task}</p>
+                  <p>
+                    <Highlight text={item.task} words={highlight} />
+                  </p>
                   {(item.owner || item.due) && (
                     <div className="chips">
                       {item.owner && (

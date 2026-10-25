@@ -73,12 +73,13 @@ fn main() -> Result<()> {
 fn process(library: &Library, settings: &Settings, id: &CallId) -> Result<()> {
     let pipeline = default_pipeline(settings)?;
     eprintln!("{id}");
-    pipeline.run(library, id, &|event| match event {
+    pipeline.run(library, id, true, &|event| match event {
         Event::StepStarted { step, .. } => eprint!("  {step}..."),
         Event::StepProgress { step, fraction, .. } => {
             eprint!("\r  {step}... {:>3.0}%", fraction * 100.0);
             let _ = std::io::stderr().flush();
         }
+        Event::StepPostponed { step, .. } => eprintln!("\r  {step}... postponed"),
         Event::StepFinished { step, .. } => eprintln!("\r  {step}... done"),
         Event::Failed { step, error, .. } => eprintln!("\r  {step}... failed\n{error}"),
         Event::Finished { .. } => eprintln!("  -> {}", library.dir(id).join(transcript::TRANSCRIPT_MD).display()),

@@ -83,6 +83,11 @@ fn main() {
             commands::list_calls,
             commands::get_call,
             commands::summaries,
+            commands::get_notes,
+            commands::save_notes_text,
+            commands::add_mark,
+            commands::set_mark,
+            commands::search,
             commands::import_files,
             commands::process_call,
             commands::rename_call,
@@ -120,6 +125,8 @@ fn main() {
             commands::start_recording,
             commands::stop_recording,
             commands::dismiss_island,
+            commands::island_resize,
+            commands::island_reset_place,
             commands::show_call,
         ])
         .build(tauri::generate_context!())
@@ -197,7 +204,7 @@ fn resume_interrupted(library: &Library, queue: &Queue) -> anyhow::Result<()> {
 }
 
 fn spawn_queue(app: AppHandle, library: Library, settings: SharedSettings) -> Queue {
-    Queue::spawn(move |id| {
+    Queue::spawn(move |id, on_demand| {
         let emit = |event: Event| {
             if let Some(st) = app.try_state::<AppState>() {
                 st.recorder.on_pipeline_event(&app, &event);
@@ -205,7 +212,7 @@ fn spawn_queue(app: AppHandle, library: Library, settings: SharedSettings) -> Qu
             let _ = app.emit(PIPELINE_EVENT, event);
         };
         // Read for every call, so a model chosen in the settings applies to the next one.
-        let result = default_pipeline(&read(&settings)).and_then(|pipeline| pipeline.run(&library, id, &emit));
+        let result = default_pipeline(&read(&settings)).and_then(|pipeline| pipeline.run(&library, id, on_demand, &emit));
         if let Err(e) = result {
             eprintln!("{id}: {e:#}");
             mark_failed_if_unhandled(&library, id, &e, &emit);

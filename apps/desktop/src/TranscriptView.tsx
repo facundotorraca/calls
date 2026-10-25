@@ -1,6 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
-import type { Segment, Transcript } from "./api";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
+import type { Mark, Segment, Transcript } from "./api";
 import { formatTimestamp } from "./format";
+import { Highlight } from "./Search";
 
 /** Consecutive segments of one speaker, read as a paragraph. */
 interface Turn {
@@ -60,11 +61,28 @@ interface Props {
   onRenameSpeaker?: (from: string, to: string) => void;
   /** The label of the person using the app, offered as "soy yo" when renaming. */
   me?: string;
+  /** Moments the user marked, shown after the turn they fall in. */
+  marks?: Mark[];
+  /** Words of a search, marked in the text. */
+  highlight?: string[];
 }
 
 /** Re-renders only when the playing segment changes, not on every frame of playback. */
-export const TranscriptView = memo(function TranscriptView({ transcript, active, onSeek, onRenameSpeaker, me }: Props) {
+export const TranscriptView = memo(function TranscriptView({
+  transcript,
+  active,
+  onSeek,
+  onRenameSpeaker,
+  me,
+  marks = [],
+  highlight,
+}: Props) {
   const names = speakers(transcript);
+  const all = turns(transcript);
+  // Each moment goes after the last turn started before it: what was just said is what
+  // made someone mark it.
+  const marksAfter = (i: number) =>
+    marks.filter((m) => m.at_ms >= (i === 0 ? -Infinity : all[i].start_ms) && (all[i + 1] === undefined || m.at_ms < all[i + 1].start_ms));
   const activeEl = useRef<HTMLSpanElement>(null);
   const previous = useRef<HTMLSpanElement | null>(null);
 
@@ -86,10 +104,11 @@ export const TranscriptView = memo(function TranscriptView({ transcript, active,
 
   return (
     <div className="transcript">
-      {turns(transcript).map((turn, i) => {
+      {all.map((turn, i) => {
         const color = turn.speaker ? names.indexOf(turn.speaker) % 6 : undefined;
         return (
-          <div key={i} className="turn" data-speaker={color}>
+          <Fragment key={i}>
+          <div className="turn" data-speaker={color}>
             <button className="turn-time" onClick={() => seek(turn.start_ms)} disabled={!onSeek}>
               {formatTimestamp(turn.start_ms)}
             </button>
@@ -106,15 +125,29 @@ export const TranscriptView = memo(function TranscriptView({ transcript, active,
                     key={j}
                     ref={segment === active ? activeEl : undefined}
                     className={segment === active ? "segment active" : "segment"}
+                    data-start={segment.start_ms}
                     title={formatTimestamp(segment.start_ms)}
                     onClick={() => seek(segment.start_ms)}
                   >
-                    {segment.text}{" "}
+                    <Highlight text={segment.text} words={highlight} />{" "}
                   </span>
                 ))}
               </p>
             </div>
           </div>
+          {marksAfter(i).map((m) => (
+            <div key={`mark-${m.at_ms}`} className="turn turn-mark">
+              <button className="turn-time" onClick={() => seek(m.at_ms)} disabled={!onSeek}>
+                {formatTimestamp(m.at_ms)}
+              </button>
+              <p className="turn-mark-body">
+                <span className="mark-square" />
+                <span className="tech-label">momento</span>
+                {m.text && <span className="turn-mark-text">{m.text}</span>}
+              </p>
+            </div>
+          ))}
+          </Fragment>
         );
       })}
     </div>

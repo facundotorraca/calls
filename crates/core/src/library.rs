@@ -8,6 +8,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::call::{CALL_FILE, TrackRole};
+use crate::notes::{Mark, Notes};
 use crate::notion::{CallNotion, NotionPage};
 use crate::summary::{SUMMARY_MD, Summary};
 use crate::transcript::{TRANSCRIPT_JSON, TRANSCRIPT_MD};
@@ -146,6 +147,7 @@ impl Library {
         if let Some(summary) = Summary::load(&dir)? {
             fs::write(dir.join(SUMMARY_MD), summary.to_markdown(title))?;
         }
+        Notes::load(&dir)?.save(&dir, title)?;
         Ok(call)
     }
 
@@ -388,6 +390,32 @@ impl Library {
         change(&mut notion);
         notion.save(&dir)?;
         Ok(notion)
+    }
+
+    /// What the user wrote about a call; empty if nothing.
+    pub fn notes(&self, id: &CallId) -> Result<Notes> {
+        Notes::load(&self.dir(id))
+    }
+
+    /// Changes a call's notes under the lock: typing in the app and a moment marked from the
+    /// island at the same time must both stay.
+    pub fn update_notes(&self, id: &CallId, change: impl FnOnce(&mut Notes)) -> Result<Notes> {
+        let _guard = self.lock();
+        let call = self.load(id)?;
+        let dir = self.dir(id);
+        let mut notes = Notes::load(&dir)?;
+        change(&mut notes);
+        notes.save(&dir, &call.title)?;
+        Ok(notes)
+    }
+
+    /// Marks a moment of a call. Two marks at the same millisecond are one.
+    pub fn add_mark(&self, id: &CallId, at_ms: u64) -> Result<Notes> {
+        self.update_notes(id, |notes| {
+            if !notes.marks.iter().any(|m| m.at_ms == at_ms) {
+                notes.marks.push(Mark { at_ms, text: String::new() });
+            }
+        })
     }
 
     /// The fingerprint of a speaker's voice in a call, if diarization took it.

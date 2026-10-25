@@ -6,12 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use calls_core::engines::Llm;
+use calls_core::engines::{Llm, MemoryShortage};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const NOT_RUNNING: &str = "Ollama is not running (open the Ollama app)";
+const GB: u64 = 1_000_000_000;
 
 pub struct Ollama {
     base_url: String,
@@ -91,6 +92,45 @@ impl Llm for Ollama {
         let answer = self.chat(system, prompt, schema.clone(), true)?;
         parse_json(&answer).context("the model did not answer with JSON")
     }
+
+    fn memory_shortage(&self) -> Option<MemoryShortage> {
+        // Only this computer's memory can be told, and a loaded model needs nothing more.
+        if !is_local(&self.base_url) || self.is_loaded().unwrap_or(true) {
+            return None;
+        }
+        let size = installed(&self.base_url).ok()?.into_iter().find(|m| m.name == self.model)?.size;
+        // The weights, plus room for the context and Ollama itself.
+        let needed = size + size / 10 + GB;
+        let available = crate::memory::available()?;
+        (available < needed).then_some(MemoryShortage { needed, available })
+    }
+}
+
+impl Ollama {
+    /// Whether Ollama has the model in memory now.
+    fn is_loaded(&self) -> Result<bool> {
+        #[derive(Deserialize)]
+        struct Running {
+            models: Vec<Model>,
+        }
+        #[derive(Deserialize)]
+        struct Model {
+            name: String,
+        }
+        let running: Running = self
+            .client
+            .get(endpoint(&self.base_url, "ps"))
+            .timeout(Duration::from_secs(3))
+            .send()?
+            .error_for_status()?
+            .json()?;
+        Ok(running.models.iter().any(|m| m.name == self.model))
+    }
+}
+
+fn is_local(base_url: &str) -> bool {
+    let host = base_url.split("://").nth(1).unwrap_or(base_url);
+    ["localhost", "127.0.0.1", "[::1]"].iter().any(|local| host.starts_with(local))
 }
 
 /// A model Ollama has downloaded.
@@ -213,6 +253,13 @@ fn has_required_fields(value: &Value, schema: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_this_computer_is_local() {
+        assert!(is_local("http://localhost:11434"));
+        assert!(is_local("http://127.0.0.1:11434/"));
+        assert!(!is_local("https://gpu-box.lan:11434"));
+    }
 
     #[test]
     fn json_in_a_code_block() {

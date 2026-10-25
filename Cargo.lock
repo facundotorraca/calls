@@ -447,6 +447,7 @@ dependencies = [
  "calls-engines",
  "objc2-app-kit",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

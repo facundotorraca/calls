@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
+use serde::Serialize;
 
 use crate::Transcript;
 
@@ -69,4 +70,17 @@ pub trait Diarizer: Send + Sync {
 pub trait Llm: Send + Sync {
     /// Asks for an answer as a JSON value matching `schema` (a JSON Schema object).
     fn json(&self, system: &str, prompt: &str, schema: &serde_json::Value) -> Result<serde_json::Value>;
+
+    /// Whether loading the model now would leave the computer short of memory. `None` if
+    /// it fits, is already loaded, runs elsewhere or that cannot be told.
+    fn memory_shortage(&self) -> Option<MemoryShortage> {
+        None
+    }
+}
+
+/// A model that does not fit in the memory free right now, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MemoryShortage {
+    pub needed: u64,
+    pub available: u64,
 }

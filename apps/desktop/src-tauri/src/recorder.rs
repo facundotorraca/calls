@@ -29,8 +29,14 @@ pub enum Island {
     Hidden,
     Detected { app_name: String },
     Recording { call_id: CallId, app_name: Option<String>, started_at_ms: u64 },
-    Processing { call_id: CallId, step: String, fraction: f32 },
-    Done { call_id: CallId, failed: bool },
+    Processing {
+        call_id: CallId,
+        step: String,
+        fraction: f32,
+        /// Some step was left for later (the summary, when there was no memory for it).
+        postponed: bool,
+    },
+    Done { call_id: CallId, title: String, failed: bool, postponed: bool },
 }
 
 struct Recording {
@@ -99,17 +105,27 @@ impl Recorder {
     /// Follows the processing of the call just recorded, to show its progress on the island.
     pub fn on_pipeline_event(&self, app: &AppHandle, event: &Event) {
         let mut s = self.lock();
-        let Island::Processing { call_id, .. } = &s.island else { return };
-        let call_id = call_id.clone();
+        let Island::Processing { call_id, postponed, .. } = &s.island else { return };
+        let (call_id, postponed) = (call_id.clone(), *postponed);
+        let title = |id: &CallId| {
+            app.try_state::<AppState>().and_then(|st| st.library.load(id).ok()).map(|c| c.title).unwrap_or_default()
+        };
         let next = match event {
             Event::StepStarted { call_id: id, step } if *id == call_id => {
-                Island::Processing { call_id, step: step.clone(), fraction: 0.0 }
+                Island::Processing { call_id, step: step.clone(), fraction: 0.0, postponed }
             }
             Event::StepProgress { call_id: id, step, fraction } if *id == call_id => {
-                Island::Processing { call_id, step: step.clone(), fraction: *fraction }
+                Island::Processing { call_id, step: step.clone(), fraction: *fraction, postponed }
             }
-            Event::Finished { call_id: id } if *id == call_id => Island::Done { call_id, failed: false },
-            Event::Failed { call_id: id, .. } if *id == call_id => Island::Done { call_id, failed: true },
+            Event::StepPostponed { call_id: id, step } if *id == call_id => {
+                Island::Processing { call_id, step: step.clone(), fraction: 1.0, postponed: true }
+            }
+            Event::Finished { call_id: id } if *id == call_id => {
+                Island::Done { title: title(&call_id), call_id, failed: false, postponed }
+            }
+            Event::Failed { call_id: id, .. } if *id == call_id => {
+                Island::Done { title: title(&call_id), call_id, failed: true, postponed }
+            }
             _ => return,
         };
         if let Island::Done { call_id, .. } = &next {
@@ -189,7 +205,7 @@ impl Recorder {
         {
             eprintln!("could not stop recording: {e:#}");
         }
-        set_island(app, s, Island::Processing { call_id, step: "saving".into(), fraction: 0.0 });
+        set_island(app, s, Island::Processing { call_id, step: "saving".into(), fraction: 0.0, postponed: false });
     }
 
     fn on_stopped(&self, app: &AppHandle, st: &AppState, files: Vec<String>, offsets_ms: HashMap<String, u64>) {

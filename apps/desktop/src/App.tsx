@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -27,6 +27,7 @@ import { Dashboard } from "./Dashboard";
 import { useCallDrag } from "./drag";
 import { Folders, inScope, scopeLabel, type Scope } from "./Folders";
 import { SearchIcon, SlidersIcon, SortIcon } from "./icons";
+import { queryWords, SearchResults, useSearch, type Focus } from "./Search";
 import { SetupBanner } from "./SetupBanner";
 import { plural } from "./SummaryView";
 import { normalize, popupMenu, usePersistentState } from "./ui";
@@ -164,16 +165,30 @@ export function App() {
     return () => void unlisten.then((fn) => fn());
   }, [importPaths]);
 
+  // A search looks in every folder and inside every call (Rust side). Until its first answer,
+  // titles that match fill the list so typing never shows it empty.
+  const search = useSearch(query);
   const visible = useMemo(() => {
     const words = normalize(query).split(/\s+/).filter(Boolean);
+    if (words.length === 0) return sortCalls(calls.filter((call) => inScope(call, scope)), sort);
+    if (search.results) {
+      const found = new Set(search.results.map((r) => r.id));
+      return sortCalls(calls.filter((call) => found.has(call.id)), sort);
+    }
     const matches = (call: Call) => {
       const text = normalize(`${call.title} ${call.folder ?? ""}`);
       return words.every((word) => text.includes(word));
     };
-    // A search looks in every folder.
-    const inView = calls.filter((call) => (words.length > 0 ? matches(call) : inScope(call, scope)));
-    return sortCalls(inView, sort);
-  }, [calls, query, scope, sort]);
+    return sortCalls(calls.filter(matches), sort);
+  }, [calls, query, scope, sort, search.results]);
+
+  // A call opened from a search result shows where the words are.
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const openCall = useCallback((id: CallId, at?: Focus) => {
+    setSelected(id);
+    setFocus(at ?? null);
+  }, []);
+  const searchInput = useRef<HTMLInputElement>(null);
 
   const callMenu = (call: Call) =>
     popupMenu([
@@ -233,9 +248,14 @@ export function App() {
 
   const current = calls.find((c) => c.id === selected) ?? null;
 
-  // ⌘⌫ trashes the open call and Escape goes back to the dashboard, outside of text fields.
+  // ⌘F searches; ⌘⌫ trashes the open call and Escape goes back to the dashboard, outside of text fields.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === "f") {
+        e.preventDefault();
+        searchInput.current?.select();
+        return;
+      }
       if (!current || (e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
       if (e.key === "Escape" && !e.metaKey) {
         setSelected(null);
@@ -276,10 +296,15 @@ export function App() {
           <label className="search">
             <SearchIcon />
             <input
+              ref={searchInput}
               type="search"
-              placeholder="Buscar"
+              placeholder="Buscar en todo  ⌘F"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                // Typing shows the results; a call opens from them.
+                setSelected(null);
+              }}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             />
             <button className="search-action" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
@@ -315,7 +340,7 @@ export function App() {
                   ? "Todavía no hay llamadas."
                   : "No hay llamadas acá. Arrastrá alguna a esta carpeta."
             }
-            onSelect={(id) => !justDropped() && setSelected(id)}
+            onSelect={(id) => !justDropped() && openCall(id)}
             onDragStart={startDrag}
             onContextMenu={callMenu}
           />
@@ -341,12 +366,23 @@ export function App() {
             notion={settings?.notion ?? NO_NOTION}
             progress={progress[current.id]}
             folders={folders}
-            back={scopeLabel(scope)}
+            back={searching ? "búsqueda" : scopeLabel(scope)}
             onBack={() => setSelected(null)}
+            focus={focus}
+            highlight={searching ? queryWords(query) : undefined}
             renameRequested={renaming === current.id}
             onRenameStarted={() => setRenaming(null)}
             onChanged={refresh}
             onError={showError}
+          />
+        ) : searching ? (
+          <SearchResults
+            query={query}
+            results={search.results}
+            pending={search.pending}
+            calls={calls}
+            folders={folders}
+            onOpen={openCall}
           />
         ) : (
           loaded && (
@@ -356,7 +392,7 @@ export function App() {
               calls={calls}
               folders={folders}
               progress={progress}
-              onOpen={setSelected}
+              onOpen={openCall}
               onScope={changeScope}
               onImport={pickFiles}
             />

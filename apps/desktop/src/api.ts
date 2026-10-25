@@ -54,6 +54,37 @@ export interface Summary {
   action_items: ActionItem[];
 }
 
+/** What the user wrote about a call (crates/core/src/notes.rs). */
+export interface Notes {
+  text: string;
+  /** In order of time. */
+  marks: Mark[];
+}
+
+/** A moment worth coming back to, with an optional line about it. */
+export interface Mark {
+  at_ms: number;
+  text: string;
+}
+
+/** Mirrors crates/core/src/search.rs. */
+export type HitKind = "summary" | "decision" | "task" | "notes" | "mark" | "transcript";
+
+export interface Hit {
+  kind: HitKind;
+  text: string;
+  at_ms?: number;
+  speaker?: string;
+}
+
+export interface SearchResult {
+  id: CallId;
+  /** The best passages, the ones with the most of the words first. */
+  hits: Hit[];
+  /** Passages with any of the words. */
+  total: number;
+}
+
 export interface CallDetail {
   call: Call;
   dir: string;
@@ -170,6 +201,7 @@ export type DownloadEvent = DownloadTarget &
 export type PipelineEvent =
   | { kind: "step_started"; call_id: CallId; step: string }
   | { kind: "step_progress"; call_id: CallId; step: string; fraction: number }
+  | { kind: "step_postponed"; call_id: CallId; step: string }
   | { kind: "step_finished"; call_id: CallId; step: string }
   | { kind: "finished"; call_id: CallId }
   | { kind: "failed"; call_id: CallId; step: string; error: string };
@@ -179,6 +211,15 @@ export const api = {
   getCall: (id: CallId) => invoke<CallDetail>("get_call", { id }),
   /** Every call's summary, keyed by call; calls without one are missing. */
   summaries: () => invoke<Record<CallId, Summary>>("summaries"),
+  getNotes: (id: CallId) => invoke<Notes>("get_notes", { id }),
+  /** The free text only; marks have their own commands. */
+  saveNotesText: (id: CallId, text: string) => invoke<void>("save_notes_text", { id, text }),
+  /** Without `atMs`, now in the call being recorded (`id` defaults to it). */
+  addMark: (id?: CallId, atMs?: number) => invoke<Notes>("add_mark", { id, atMs }),
+  /** `null` text removes the moment. */
+  setMark: (id: CallId, atMs: number, text: string | null) => invoke<Notes>("set_mark", { id, atMs, text }),
+  /** Calls with every word somewhere in them, title matches first. */
+  search: (query: string) => invoke<SearchResult[]>("search", { query }),
   importFiles: (paths: string[]) => invoke<Call[]>("import_files", { paths }),
   processCall: (id: CallId) => invoke<void>("process_call", { id }),
   renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
@@ -197,6 +238,10 @@ export const api = {
   startRecording: () => invoke<CallId>("start_recording"),
   stopRecording: () => invoke<void>("stop_recording"),
   dismissIsland: () => invoke<void>("dismiss_island"),
+  /** Fits the island's window to its content, in logical points. */
+  islandResize: (width: number, height: number) => invoke<void>("island_resize", { width, height }),
+  /** Back to the top center of the screen. */
+  islandResetPlace: () => invoke<void>("island_reset_place"),
   showCall: (id: CallId) => invoke<void>("show_call", { id }),
   getSettings: () => invoke<Settings>("get_settings"),
   updateSettings: (settings: Settings) => invoke<void>("update_settings", { settings }),
@@ -234,8 +279,15 @@ export type Island =
   | { kind: "hidden" }
   | { kind: "detected"; app_name: string }
   | { kind: "recording"; call_id: CallId; app_name: string | null; started_at_ms: number }
-  | { kind: "processing"; call_id: CallId; step: string; fraction: number }
-  | { kind: "done"; call_id: CallId; failed: boolean };
+  | {
+      kind: "processing";
+      call_id: CallId;
+      step: string;
+      fraction: number;
+      /** Some step was left for later (the summary, when there was no memory for it). */
+      postponed: boolean;
+    }
+  | { kind: "done"; call_id: CallId; title: string; failed: boolean; postponed: boolean };
 
 export interface Levels {
   mic: number;
@@ -253,6 +305,9 @@ export type SettingsPage = "general" | "transcription" | "summary" | "notion";
 
 /** The speaker label of the person using the app. */
 export const me = (settings: Settings) => settings.user_name.trim() || "Yo";
+
+export const onNotesChanged = (handler: (id: CallId) => void) =>
+  listen<CallId>("notes_changed", (e) => handler(e.payload));
 
 export const onSettingsChanged = (handler: () => void) => listen("settings_changed", () => handler());
 export const onDownload = (handler: (event: DownloadEvent) => void) =>

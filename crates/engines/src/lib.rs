@@ -5,6 +5,7 @@
 pub mod audio;
 mod ffmpeg;
 pub mod keychain;
+mod memory;
 pub mod models;
 pub mod notion;
 pub mod ollama;

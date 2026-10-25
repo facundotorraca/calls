@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type Call, type CallDetail, type Folder, type Segment, type Settings } from "./api";
+import { api, onNotesChanged, type Call, type CallDetail, type Folder, type Notes, type Segment, type Settings } from "./api";
 import type { ProgressMap } from "./CallList";
 import { formatDuration, stepLabel } from "./format";
+import { NotesView } from "./NotesView";
 import { NotionControl } from "./Notion";
+import type { Focus } from "./Search";
 import { folderColor, FolderMark } from "./Folders";
 import { ChevronIcon, FinderIcon, PencilIcon } from "./icons";
 import { Player, type PlayerHandle } from "./Player";
@@ -24,6 +26,10 @@ interface Props {
   /** The name of the dashboard the call was opened from, for the way back. */
   back: string;
   onBack: () => void;
+  /** Opened from a search: the tab and moment to show. */
+  focus?: Focus | null;
+  /** The words searched for, marked in the summary and the transcript. */
+  highlight?: string[];
   /** Switch the title to editing ("Renombrar" in the sidebar), then call `onRenameStarted`. */
   renameRequested: boolean;
   onRenameStarted: () => void;
@@ -40,6 +46,8 @@ export function CallView({
   folders,
   back,
   onBack,
+  focus,
+  highlight,
   renameRequested,
   onRenameStarted,
   onChanged,
@@ -57,6 +65,20 @@ export function CallView({
     };
   }, [call.id, call.status.state, edits]);
 
+  // The user's notes, reloaded when a moment is marked from the island.
+  const [notes, setNotes] = useState<{ id: string; notes: Notes } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => api.getNotes(call.id).then((n) => !cancelled && setNotes({ id: call.id, notes: n }), onError);
+    load();
+    const unlisten = onNotesChanged((id) => id === call.id && load());
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, [call.id, onError]);
+  const callNotes = notes?.id === call.id ? notes.notes : null;
+
   const current = detail?.call.id === call.id ? detail : null;
   const transcript = current?.transcript ?? null;
   const summary = current?.summary ?? null;
@@ -68,10 +90,18 @@ export function CallView({
   // The player reports its position every frame; only a change of segment re-renders.
   const player = useRef<PlayerHandle>(null);
   const [playing, setPlaying] = useState<Segment | null>(null);
+  const time = useRef(0);
   const onTime = useCallback(
-    (ms: number) => setPlaying(transcript ? segmentAt(transcript.segments, ms) : null),
+    (ms: number) => {
+      time.current = ms;
+      setPlaying(transcript ? segmentAt(transcript.segments, ms) : null);
+    },
     [transcript],
   );
+  const position = useCallback(() => time.current, []);
+  useEffect(() => {
+    time.current = 0;
+  }, [call.id]);
   const seek = useCallback((ms: number) => player.current?.seek(ms), []);
 
   const renameSpeaker = useCallback(
@@ -92,7 +122,7 @@ export function CallView({
       meta: summary && summaryMeta(summary),
       actions: summary && <CopyButton text={() => summaryText(summary)} />,
       content: summary ? (
-        <SummaryView summary={summary} />
+        <SummaryView summary={summary} highlight={highlight} />
       ) : summarizing ? (
         <div className="tab-placeholder">
           <span className="spinner" />
@@ -105,6 +135,25 @@ export function CallView({
             generar resumen
           </button>
         </div>
+      ),
+    });
+  }
+  if (callNotes) {
+    const marks = callNotes.marks.length;
+    tabs.push({
+      id: "notes",
+      label: "notas",
+      meta: marks > 0 && plural(marks, "momento", "momentos"),
+      content: (
+        <NotesView
+          callId={call.id}
+          notes={callNotes}
+          recording={state === "recording"}
+          position={position}
+          onSeek={seek}
+          onMarks={(n) => setNotes({ id: call.id, notes: n })}
+          onError={onError}
+        />
       ),
     });
   }
@@ -128,11 +177,42 @@ export function CallView({
         </>
       ),
       content: (
-        <TranscriptView transcript={transcript} active={playing} onSeek={seek} onRenameSpeaker={renameSpeaker} me={me} />
+        <TranscriptView
+          transcript={transcript}
+          active={playing}
+          marks={callNotes?.marks}
+          highlight={highlight}
+          onSeek={seek}
+          onRenameSpeaker={renameSpeaker}
+          me={me}
+        />
       ),
     });
   }
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0];
+
+  // From a search: open its tab, then, once the passage is on the page, bring it into view.
+  const pendingFocus = useRef<Focus | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    pendingFocus.current = focus;
+    setTabId(focus.tab);
+  }, [focus, setTabId]);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target || activeTab?.id !== target.tab) return;
+    if (target.at_ms == null) {
+      pendingFocus.current = null;
+      return;
+    }
+    const el = document.querySelector(`[data-start="${target.at_ms}"], [data-mark="${target.at_ms}"]`);
+    if (!el) return;
+    pendingFocus.current = null;
+    el.scrollIntoView({ block: "center" });
+    el.classList.remove("flash");
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add("flash");
+  });
 
   const rename = async (title: string) => {
     try {

@@ -13,6 +13,13 @@ export function inScope(call: Call, scope: Scope): boolean {
   return call.folder === scope.name;
 }
 
+/** How a scope is named in titles and breadcrumbs. */
+export function scopeLabel(scope: Scope): string {
+  if (scope.kind === "all") return "Todas las llamadas";
+  if (scope.kind === "unfiled") return "Sin carpeta";
+  return scope.name;
+}
+
 /** A folder's icon, tinted with its color. */
 export function FolderMark({ color }: { color?: FolderColor }) {
   return (
@@ -102,6 +109,7 @@ export function Folders({ folders, calls, scope, onScope, dropTarget, onChanged,
           })),
         ],
       },
+      { text: "Página de Notion…", action: () => api.openSettings("notion") },
       "separator",
       { text: "Eliminar carpeta (las llamadas quedan)", action: () => remove(name) },
     ]);

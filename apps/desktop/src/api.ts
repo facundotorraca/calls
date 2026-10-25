@@ -74,6 +74,27 @@ export const FOLDER_COLORS: Record<FolderColor, string> = {
 export interface Folder {
   name: string;
   color?: FolderColor;
+  /** The Notion page its calls go under. */
+  notion?: NotionPage;
+}
+
+/** A Notion page picked by pasting its link (crates/core/src/notion.rs). */
+export interface NotionPage {
+  id: string;
+  title: string;
+  url: string;
+}
+
+/** Which level a call's Notion parent page was set at, from the most general. */
+export type NotionLevel = "default" | "folder" | "call";
+
+export interface NotionStatus {
+  /** The page its page goes under, if any level has one. */
+  destination: { page: NotionPage; level: NotionLevel } | null;
+  /** Set for this call only. */
+  call_parent: NotionPage | null;
+  /** The last sync. */
+  synced: { page_id: string; url: string; parent_id: string; at: string } | null;
 }
 
 export interface Doctor {
@@ -110,6 +131,12 @@ export interface Settings {
   /** Written into the prompt, e.g. `español`. */
   summary_language: string;
   llm: { base_url: string; model: string };
+  notion: {
+    /** The connected workspace; the token is in the Keychain. */
+    workspace: string | null;
+    /** Where call pages go when neither the call nor its folder has a page of its own. */
+    parent: NotionPage | null;
+  };
 }
 
 /** A whisper.cpp model offered or on disk (crates/engines/src/models.rs). */
@@ -150,6 +177,8 @@ export type PipelineEvent =
 export const api = {
   listCalls: () => invoke<Call[]>("list_calls"),
   getCall: (id: CallId) => invoke<CallDetail>("get_call", { id }),
+  /** Every call's summary, keyed by call; calls without one are missing. */
+  summaries: () => invoke<Record<CallId, Summary>>("summaries"),
   importFiles: (paths: string[]) => invoke<Call[]>("import_files", { paths }),
   processCall: (id: CallId) => invoke<void>("process_call", { id }),
   renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
@@ -171,7 +200,8 @@ export const api = {
   showCall: (id: CallId) => invoke<void>("show_call", { id }),
   getSettings: () => invoke<Settings>("get_settings"),
   updateSettings: (settings: Settings) => invoke<void>("update_settings", { settings }),
-  openSettings: () => invoke<void>("open_settings"),
+  /** On `page` if given. */
+  openSettings: (page?: SettingsPage) => invoke<void>("open_settings", { page }),
   localModels: (kind: "whisper" | "vad") => invoke<LocalModel[]>("local_models", { kind }),
   deleteLocalModel: (name: string) => invoke<void>("delete_local_model", { name }),
   /** Fails if Ollama is not running. */
@@ -186,6 +216,14 @@ export const api = {
   diarizationReady: () => invoke<boolean>("diarization_ready"),
   /** Renames a speaker throughout the call's transcript. */
   renameSpeaker: (id: CallId, from: string, to: string) => invoke<void>("rename_speaker", { id, from, to }),
+  notionConnect: (token: string) => invoke<string>("notion_connect", { token }),
+  notionDisconnect: () => invoke<void>("notion_disconnect"),
+  notionPage: (link: string) => invoke<NotionPage>("notion_page", { link }),
+  setFolderNotion: (name: string, page: NotionPage | null) => invoke<void>("set_folder_notion", { name, page }),
+  notionStatus: (id: CallId) => invoke<NotionStatus>("notion_status", { id }),
+  setCallNotion: (id: CallId, page: NotionPage | null) => invoke<NotionStatus>("set_call_notion", { id, page }),
+  /** Creates or updates the call's page, named after it, under its parent page. */
+  syncNotion: (id: CallId) => invoke<NotionStatus>("sync_notion", { id }),
   /** How many voices the user's voice was learnt from; null if it was not. */
   myVoice: () => invoke<number | null>("my_voice"),
   forgetMyVoice: () => invoke<void>("forget_my_voice"),
@@ -209,6 +247,9 @@ export const onLevels = (handler: (levels: Levels) => void) =>
   listen<Levels>("audio_levels", (e) => handler(e.payload));
 export const onLibraryChanged = (handler: () => void) => listen("library_changed", () => handler());
 export const onSelectCall = (handler: (id: CallId) => void) => listen<CallId>("select_call", (e) => handler(e.payload));
+
+/** The pages of the settings window. */
+export type SettingsPage = "general" | "transcription" | "summary" | "notion";
 
 /** The speaker label of the person using the app. */
 export const me = (settings: Settings) => settings.user_name.trim() || "Yo";

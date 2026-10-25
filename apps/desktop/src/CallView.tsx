@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type Call, type CallDetail, type Folder, type Segment } from "./api";
+import { api, type Call, type CallDetail, type Folder, type Segment, type Settings } from "./api";
 import type { ProgressMap } from "./CallList";
 import { formatDuration, stepLabel } from "./format";
+import { NotionControl } from "./Notion";
 import { folderColor, FolderMark } from "./Folders";
 import { ChevronIcon, FinderIcon, PencilIcon } from "./icons";
 import { Player, type PlayerHandle } from "./Player";
@@ -17,8 +18,12 @@ interface Props {
   canDiarize: boolean;
   /** The speaker label of the person using the app. */
   me: string;
+  notion: Settings["notion"];
   progress?: ProgressMap[string];
   folders: Folder[];
+  /** The name of the dashboard the call was opened from, for the way back. */
+  back: string;
+  onBack: () => void;
   /** Switch the title to editing ("Renombrar" in the sidebar), then call `onRenameStarted`. */
   renameRequested: boolean;
   onRenameStarted: () => void;
@@ -30,8 +35,11 @@ export function CallView({
   call,
   canDiarize,
   me,
+  notion,
   progress,
   folders,
+  back,
+  onBack,
   renameRequested,
   onRenameStarted,
   onChanged,
@@ -155,6 +163,11 @@ export function CallView({
     <article className="call-view">
       <header className="call-header dot-grid">
         <div className="call-rail">
+          <button className="ghost-button tech-label back-button" onClick={onBack} title="Volver (esc)">
+            <ChevronIcon className="chevron-back" />
+            {back}
+          </button>
+          <span className="call-rail-sep" aria-hidden />
           <button
             className="folder-chip tech-label"
             data-color={folderColor(folders, call.folder)}
@@ -171,6 +184,8 @@ export function CallView({
               finder
             </button>
           )}
+          <span className="call-rail-spacer" />
+          <NotionControl call={call} notion={notion} onError={onError} />
         </div>
         <div className="call-title-row">
           <EditableTitle

@@ -8,6 +8,7 @@ pub mod call;
 pub mod detect;
 pub mod engines;
 pub mod library;
+pub mod notion;
 pub mod pipeline;
 pub mod queue;
 pub mod settings;

@@ -2,30 +2,44 @@
 // and which ones the app uses.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   api,
   onDownload,
   onSettingsChanged,
   type DownloadTarget,
+  type Folder,
   type LocalModel,
   type OllamaModel,
   type Settings as SettingsData,
+  type SettingsPage as Page,
 } from "./api";
 import { formatBytes } from "./format";
-import { ExternalIcon, FinderIcon, SlidersIcon, SparklesIcon, TextIcon } from "./icons";
+import { ExternalIcon, FinderIcon, PageIcon, SlidersIcon, SparklesIcon, TextIcon } from "./icons";
+import { PagePicker } from "./Notion";
 import { usePersistentState } from "./ui";
 
-type Page = "general" | "transcription" | "summary";
 
 const PAGES: { id: Page; label: string; icon: ReactNode; group?: string }[] = [
   { id: "general", label: "General", icon: <SlidersIcon /> },
   { id: "transcription", label: "Transcripción", icon: <TextIcon />, group: "ia" },
   { id: "summary", label: "Resumen", icon: <SparklesIcon />, group: "ia" },
+  { id: "notion", label: "Notion", icon: <PageIcon />, group: "integraciones" },
 ];
+
+const isPage = (page: string): page is Page => PAGES.some((p) => p.id === page);
 
 export function Settings() {
   const [page, setPage] = usePersistentState<Page>("settings.page", "general");
+
+  // Opened (or brought up) from somewhere that needs a page: index.html#notion, or an event.
+  useEffect(() => {
+    const asked = location.hash.slice(1);
+    if (isPage(asked)) setPage(asked);
+    const unlisten = getCurrentWebviewWindow().listen<string>("settings_page", (e) => isPage(e.payload) && setPage(e.payload));
+    return () => void unlisten.then((fn) => fn());
+  }, [setPage]);
   const [settings, save, error] = useSettings();
   const downloads = useDownloads();
 
@@ -62,8 +76,10 @@ export function Settings() {
             <GeneralPage settings={settings} save={save} />
           ) : page === "transcription" ? (
             <TranscriptionPage settings={settings} save={save} downloads={downloads} />
-          ) : (
+          ) : page === "summary" ? (
             <SummaryPage settings={settings} save={save} downloads={downloads} />
+          ) : (
+            <NotionSettingsPage settings={settings} save={save} />
           ))}
       </main>
     </div>
@@ -427,6 +443,129 @@ function DiarizationSetup({ downloads }: { downloads: Downloads }) {
         unos minutos.
       </p>
     </div>
+  );
+}
+
+function NotionSettingsPage({ settings, save }: { settings: SettingsData; save: Save }) {
+  const { workspace, parent } = settings.notion;
+  const [token, setToken] = useState("");
+  const [folders, setFolders] = useState<Folder[]>([]);
+
+  // Folders are made in the main window: check again when coming back here.
+  const loadFolders = useCallback(() => void api.listFolders().then(setFolders), []);
+  useEffect(() => {
+    loadFolders();
+    window.addEventListener("focus", loadFolders);
+    return () => window.removeEventListener("focus", loadFolders);
+  }, [loadFolders]);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const connect = async () => {
+    setConnecting(true);
+    setError(null);
+    try {
+      await api.notionConnect(token.trim());
+      setToken("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <SettingsPage
+      title="notion"
+      status={workspace ? <State tone="ok">{workspace}</State> : <State tone="error">sin conectar</State>}
+    >
+      <Group label="conexión">
+        {workspace ? (
+          <Field label="Espacio de trabajo" hint="El token está guardado en el Llavero de macOS.">
+            <State tone="ok">{workspace}</State>
+            <button className="ghost-button tech-label" onClick={() => api.notionDisconnect()}>
+              desconectar
+            </button>
+          </Field>
+        ) : (
+          <div className="setup">
+            <p className="field-hint">Cada llamada se puede mandar a Notion como una página. Una sola vez:</p>
+            <ol className="setup-steps">
+              <li>
+                <span>Creá una integración interna y copiá su secreto (empieza con ntn_).</span>
+                <button
+                  className="ghost-button tech-label"
+                  onClick={() => openUrl("https://www.notion.so/profile/integrations")}
+                >
+                  <ExternalIcon />
+                  abrir
+                </button>
+              </li>
+              <li>
+                <span>Pegalo acá y conectá.</span>
+              </li>
+              <li>
+                <span>En Notion, en las páginas donde quieras las llamadas: ··· → Conexiones → tu integración.</span>
+              </li>
+            </ol>
+            <form
+              className="model-pull"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void connect();
+              }}
+            >
+              <input
+                className="text-input"
+                type="password"
+                placeholder="ntn_…"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                disabled={connecting}
+                spellCheck={false}
+              />
+              <button className="button" type="submit" disabled={!token.trim() || connecting}>
+                {connecting ? "conectando" : "conectar"}
+              </button>
+            </form>
+            {error && <p className="model-error">{error}</p>}
+            <p className="field-hint">El token se guarda en el Llavero de macOS. Nada se manda a Notion sin que toques sync.</p>
+          </div>
+        )}
+      </Group>
+
+      <p className="notion-explainer field-hint">
+        Cada llamada se crea en Notion como una página con su nombre, dentro de la página de su carpeta. Una llamada puede
+        ir a otra página: se elige en la llamada.
+      </p>
+
+      <Group label="carpetas" meta={folders.length > 0 ? `${folders.length}` : undefined}>
+        {folders.map((folder) => (
+          <Field
+            key={folder.name}
+            label={folder.name}
+            hint={folder.notion ? undefined : "Sin página: usa la por defecto."}
+            disabled={!workspace}
+          >
+            {workspace && (
+              <PagePicker
+                page={folder.notion ?? null}
+                onChange={(page) => api.setFolderNotion(folder.name, page).then(loadFolders)}
+              />
+            )}
+          </Field>
+        ))}
+        <Field
+          label="Por defecto"
+          hint="Para las llamadas sin carpeta y las carpetas sin página."
+          disabled={!workspace}
+        >
+          {workspace && (
+            <PagePicker page={parent} onChange={(page) => save({ notion: { ...settings.notion, parent: page } })} />
+          )}
+        </Field>
+      </Group>
+    </SettingsPage>
   );
 }
 

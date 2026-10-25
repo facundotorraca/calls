@@ -126,8 +126,12 @@ The original recording is referenced, never copied or moved. Settings and models
 
 ## Roadmap
 
-- Transcript as paragraphs per speaker.
-- Speaker diarization (pyannote community-1 as a Python worker), word level timestamps.
-- Speaker names with the LLM.
-- Search across calls.
-- Integrations (calendar for titles, Notion export).
+- Search across calls (titles, transcripts and summaries).
+- Import: skip duplicates by content (the same file under another name or path), import
+  whole folders, and keep going past a file that fails.
+- Re-transcribe and re-summarize existing calls (e.g. after changing the model or the
+  vocabulary); refresh the summary after renaming speakers.
+- Word level timestamps.
+- Embedded LLM: llama.cpp built from source like whisper.cpp, so the app does not need
+  Ollama installed (matters to distribute it; Ollama runs llama.cpp itself).
+- Calendar integration (titles and participants).

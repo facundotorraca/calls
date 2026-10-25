@@ -4,7 +4,9 @@
 
 pub mod audio;
 mod ffmpeg;
+pub mod keychain;
 pub mod models;
+pub mod notion;
 pub mod ollama;
 mod process;
 pub mod pyannote;

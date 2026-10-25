@@ -65,7 +65,7 @@ fn main() {
             app.set_menu(menu(app.handle())?)?;
             app.on_menu_event(|app, event| {
                 if event.id() == "settings" {
-                    open_settings(app);
+                    open_settings(app, None);
                 }
             });
             Ok(())
@@ -82,6 +82,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::list_calls,
             commands::get_call,
+            commands::summaries,
             commands::import_files,
             commands::process_call,
             commands::rename_call,
@@ -106,6 +107,13 @@ fn main() {
             commands::diarization_ready,
             commands::rename_speaker,
             commands::my_voice,
+            commands::notion_connect,
+            commands::notion_disconnect,
+            commands::notion_page,
+            commands::set_folder_notion,
+            commands::notion_status,
+            commands::set_call_notion,
+            commands::sync_notion,
             commands::forget_my_voice,
             commands::doctor,
             commands::island_state,
@@ -145,13 +153,18 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 }
 
 /// Opens the settings window, or brings it to the front if it is already open.
-pub fn open_settings(app: &AppHandle) {
+/// Opens the settings window, on `page` if given (e.g. `notion`).
+pub fn open_settings(app: &AppHandle, page: Option<&str>) {
     if let Some(window) = app.get_webview_window("settings") {
+        if let Some(page) = page {
+            let _ = window.emit("settings_page", page);
+        }
         let _ = window.unminimize();
         let _ = window.set_focus();
         return;
     }
-    let built = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
+    let url = format!("index.html#{}", page.unwrap_or_default());
+    let built = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(url.into()))
         .title("Ajustes")
         .inner_size(840.0, 620.0)
         .min_inner_size(700.0, 480.0)

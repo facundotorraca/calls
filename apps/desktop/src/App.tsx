@@ -17,11 +17,15 @@ import {
   type Doctor,
   type Folder,
   type Island,
+  type Settings,
 } from "./api";
+
+const NO_NOTION: Settings["notion"] = { workspace: null, parent: null };
 import { CallList, SORT_LABELS, sortCalls, type ProgressMap, type Sort } from "./CallList";
 import { CallView } from "./CallView";
+import { Dashboard } from "./Dashboard";
 import { useCallDrag } from "./drag";
-import { Folders, inScope, type Scope } from "./Folders";
+import { Folders, inScope, scopeLabel, type Scope } from "./Folders";
 import { SearchIcon, SlidersIcon, SortIcon } from "./icons";
 import { SetupBanner } from "./SetupBanner";
 import { plural } from "./SummaryView";
@@ -33,7 +37,7 @@ export function App() {
   const [selected, setSelected] = useState<CallId | null>(null);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [doctor, setDoctor] = useState<Doctor | null>(null);
-  const [myLabel, setMyLabel] = useState("Yo");
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [island, setIsland] = useState<Island>({ kind: "hidden" });
@@ -50,8 +54,18 @@ export function App() {
     setCalls(list);
     setFolders(folderList);
     setLoaded(true);
-    setSelected((current) => current ?? list[0]?.id ?? null);
+    // A call that went (trashed, or removed in the Finder) leaves its dashboard behind.
+    setSelected((current) => (current && list.some((c) => c.id === current) ? current : null));
   }, []);
+
+  // Picking a folder shows its dashboard; a call opens only when it is clicked.
+  const changeScope = useCallback(
+    (next: Scope) => {
+      setScope(next);
+      setSelected(null);
+    },
+    [setScope],
+  );
 
   // A remembered folder that no longer exists falls back to every call.
   useEffect(() => {
@@ -81,7 +95,6 @@ export function App() {
           await Promise.all(imported.filter((c) => !c.folder).map((c) => api.moveCall(c.id, scope.name)));
         }
         await refresh();
-        if (imported[0]) setSelected(imported[0].id);
       } catch (e) {
         showError(e);
       }
@@ -97,7 +110,7 @@ export function App() {
   const toggleRecording = async () => {
     try {
       if (recording) await api.stopRecording();
-      else setSelected(await api.startRecording());
+      else await api.startRecording();
     } catch (e) {
       showError(e);
     }
@@ -106,7 +119,7 @@ export function App() {
   useEffect(() => {
     refresh().catch(showError);
     api.doctor().then(setDoctor);
-    api.getSettings().then((s) => setMyLabel(me(s)));
+    api.getSettings().then(setSettings);
     api.islandState().then(setIsland);
   }, [refresh, showError]);
 
@@ -119,7 +132,7 @@ export function App() {
       // A model chosen or downloaded in the settings may fix (or break) the setup.
       onSettingsChanged(() => {
         api.doctor().then(setDoctor);
-        api.getSettings().then((s) => setMyLabel(me(s)));
+        api.getSettings().then(setSettings);
       }),
       onDownload((e) => e.state === "done" && api.doctor().then(setDoctor)),
     ];
@@ -199,11 +212,9 @@ export function App() {
 
   // Like the Finder: no confirmation, it can be taken back out of the Trash.
   const trashCall = async (call: Call) => {
-    const index = visible.findIndex((c) => c.id === call.id);
-    const next = visible[index + 1] ?? visible[index - 1] ?? null;
     try {
       await api.trashCall(call.id);
-      if (selected === call.id) setSelected(next?.id ?? null);
+      if (selected === call.id) setSelected(null);
       await refresh();
     } catch (e) {
       showError(e);
@@ -222,11 +233,15 @@ export function App() {
 
   const current = calls.find((c) => c.id === selected) ?? null;
 
-  // ⌘⌫ trashes the open call, outside of text fields.
+  // ⌘⌫ trashes the open call and Escape goes back to the dashboard, outside of text fields.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.key !== "Backspace" || !current || busy(current)) return;
-      if ((e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      if (!current || (e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
+      if (e.key === "Escape" && !e.metaKey) {
+        setSelected(null);
+        return;
+      }
+      if (!e.metaKey || e.key !== "Backspace" || busy(current)) return;
       e.preventDefault();
       void trashCall(current);
     };
@@ -279,7 +294,7 @@ export function App() {
               folders={folders}
               calls={calls}
               scope={scope}
-              onScope={setScope}
+              onScope={changeScope}
               dropTarget={drag?.target}
               onChanged={refresh}
               onError={showError}
@@ -322,23 +337,30 @@ export function App() {
           <CallView
             call={current}
             canDiarize={doctor?.diarization ?? false}
-            me={myLabel}
+            me={settings ? me(settings) : "Yo"}
+            notion={settings?.notion ?? NO_NOTION}
             progress={progress[current.id]}
             folders={folders}
+            back={scopeLabel(scope)}
+            onBack={() => setSelected(null)}
             renameRequested={renaming === current.id}
             onRenameStarted={() => setRenaming(null)}
             onChanged={refresh}
             onError={showError}
           />
         ) : (
-          <section className="empty">
-            <p className="empty-label tech-label">sin llamadas</p>
-            <p className="empty-title">Arrastrá una grabación acá.</p>
-            <p className="empty-hint">Video o audio: OBS, Zoom, Meet, notas de voz…</p>
-            <button className="button" onClick={pickFiles}>
-              elegir archivos
-            </button>
-          </section>
+          loaded && (
+            <Dashboard
+              key={JSON.stringify(scope)}
+              scope={scope}
+              calls={calls}
+              folders={folders}
+              progress={progress}
+              onOpen={setSelected}
+              onScope={changeScope}
+              onImport={pickFiles}
+            />
+          )
         )}
       </main>
 

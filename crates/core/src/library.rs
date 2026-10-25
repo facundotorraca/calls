@@ -8,6 +8,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::call::{CALL_FILE, TrackRole};
+use crate::notion::{CallNotion, NotionPage};
 use crate::summary::{SUMMARY_MD, Summary};
 use crate::transcript::{TRANSCRIPT_JSON, TRANSCRIPT_MD};
 use crate::{Call, CallId, Status, Track, Transcript};
@@ -23,6 +24,9 @@ struct Index {
     /// Colors chosen for folders, by name. Folders without one are not listed.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     colors: BTreeMap<String, FolderColor>,
+    /// The Notion page each folder's calls go under, by folder name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    notion: BTreeMap<String, NotionPage>,
 }
 
 /// A folder as the sidebar shows it.
@@ -31,6 +35,9 @@ pub struct Folder {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<FolderColor>,
+    /// The Notion page its calls go under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notion: Option<NotionPage>,
 }
 
 /// The tint a folder is marked with, from a short fixed palette.
@@ -154,7 +161,15 @@ impl Library {
     /// Folders, alphabetically.
     pub fn folders(&self) -> Result<Vec<Folder>> {
         let index = self.index()?;
-        Ok(index.folders.into_iter().map(|name| Folder { color: index.colors.get(&name).copied(), name }).collect())
+        Ok(index
+            .folders
+            .into_iter()
+            .map(|name| Folder {
+                color: index.colors.get(&name).copied(),
+                notion: index.notion.get(&name).cloned(),
+                name,
+            })
+            .collect())
     }
 
     /// Sets a folder's color, or clears it with `None`.
@@ -198,6 +213,9 @@ impl Library {
         if let Some(color) = index.colors.remove(from) {
             index.colors.insert(to.clone(), color);
         }
+        if let Some(page) = index.notion.remove(from) {
+            index.notion.insert(to.clone(), page);
+        }
         self.write_index(&mut index)?;
         self.relabel(from, Some(&to))
     }
@@ -208,6 +226,7 @@ impl Library {
         let mut index = self.index()?;
         index.folders.retain(|f| f != name);
         index.colors.remove(name);
+        index.notion.remove(name);
         self.write_index(&mut index)?;
         self.relabel(name, None)
     }
@@ -341,6 +360,34 @@ impl Library {
             _ => {}
         }
         remove(&self.dir(id))
+    }
+
+    /// Sets the Notion page a folder's calls go under, or clears it with `None`.
+    pub fn set_folder_notion(&self, name: &str, page: Option<NotionPage>) -> Result<()> {
+        let _guard = self.lock();
+        let mut index = self.index()?;
+        if !index.folders.iter().any(|f| f == name) {
+            bail!("folder {name} not found");
+        }
+        match page {
+            Some(page) => index.notion.insert(name.into(), page),
+            None => index.notion.remove(name),
+        };
+        self.write_index(&mut index)
+    }
+
+    /// A call's own Notion parent page and where it was last synced to.
+    pub fn notion(&self, id: &CallId) -> CallNotion {
+        CallNotion::load(&self.dir(id))
+    }
+
+    pub fn update_notion(&self, id: &CallId, change: impl FnOnce(&mut CallNotion)) -> Result<CallNotion> {
+        let _guard = self.lock();
+        let dir = self.dir(id);
+        let mut notion = CallNotion::load(&dir);
+        change(&mut notion);
+        notion.save(&dir)?;
+        Ok(notion)
     }
 
     /// The fingerprint of a speaker's voice in a call, if diarization took it.
@@ -478,8 +525,8 @@ mod tests {
         assert_eq!(
             library.folders().unwrap(),
             [
-                Folder { name: "Acme".into(), color: None },
-                Folder { name: "Clientes 2026".into(), color: Some(FolderColor::Blue) },
+                Folder { name: "Acme".into(), color: None, notion: None },
+                Folder { name: "Clientes 2026".into(), color: Some(FolderColor::Blue), notion: None },
             ]
         );
 

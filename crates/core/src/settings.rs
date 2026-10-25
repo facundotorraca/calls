@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::detect::CallApp;
+use crate::notion::NotionPage;
 
 /// User preferences, persisted as JSON in the data dir. Missing fields fall back to defaults,
 /// so adding a setting never breaks an existing file.
@@ -38,6 +39,17 @@ pub struct Settings {
     /// Language summaries are written in, whatever the call's language.
     pub summary_language: String,
     pub llm: LlmSettings,
+    pub notion: NotionSettings,
+}
+
+/// Exporting calls to Notion. The token itself is in the Keychain, not here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotionSettings {
+    /// The workspace the token belongs to, once connected.
+    pub workspace: Option<String>,
+    /// Where call pages go when neither the call nor its folder has a page of its own.
+    pub parent: Option<NotionPage>,
 }
 
 /// A local LLM served by Ollama.
@@ -70,6 +82,7 @@ impl Default for Settings {
             summarize: true,
             summary_language: "español".into(),
             llm: LlmSettings::default(),
+            notion: NotionSettings::default(),
         }
     }
 }

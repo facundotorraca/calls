@@ -125,6 +125,20 @@ export const SlidersIcon = (p: Props) => (
   </Icon>
 );
 
+export const SyncIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M13 6.5A5 5 0 0 0 3.6 5M3 9.5A5 5 0 0 0 12.4 11" />
+    <path d="M3.5 2.5V5H6M12.5 13.5V11H10" />
+  </Icon>
+);
+
+export const PageIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M3.5 2.5h6l3 3v8h-9z" />
+    <path d="M6 8h4M6 10.5h4" />
+  </Icon>
+);
+
 export const ExternalIcon = (p: Props) => (
   <Icon {...p}>
     <path d="M9 3.5h3.5V7M12.5 3.5L7.5 8.5" />

@@ -1,14 +1,17 @@
 //! Commands the UI can invoke. Each one is a thin wrapper over the core; keep logic out of here.
 //! Their TypeScript counterparts live in `src/api.ts`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::bail;
+use calls_core::notion::{Destination, NotionPage, Synced, destination};
 use calls_core::steps::{self, PLAYBACK_FILE};
 use calls_core::summary::Summary;
 use calls_core::voices::MyVoice;
 use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};
 use calls_engines::models::{self, LocalModel, ModelKind};
+use calls_engines::notion::Notion;
 use calls_engines::ollama::{self, InstalledModel};
 use calls_engines::{Doctor, Ffmpeg, pyannote};
 use serde::Serialize;
@@ -52,6 +55,20 @@ pub async fn get_call(state: State<'_, AppState>, id: CallId) -> CmdResult<CallD
     let transcript = state.library.transcript(&id).map_err(to_string)?;
     let summary = Summary::load(&dir).map_err(to_string)?;
     Ok(CallDetail { dir, call, transcript, summary })
+}
+
+/// The summary of every call that has one, for the dashboards. Transcripts are left out: they are heavy.
+#[tauri::command]
+pub async fn summaries(state: State<'_, AppState>) -> CmdResult<HashMap<CallId, Summary>> {
+    let calls = state.library.list().map_err(to_string)?;
+    let mut summaries = HashMap::new();
+    for call in calls {
+        // A summary that does not parse should not hide the others.
+        if let Ok(Some(summary)) = Summary::load(&state.library.dir(&call.id)) {
+            summaries.insert(call.id, summary);
+        }
+    }
+    Ok(summaries)
 }
 
 /// Registers the files as calls and queues them for processing.
@@ -149,16 +166,127 @@ pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
 /// Saves the settings and applies them: the next call processed uses them.
 #[tauri::command]
 pub async fn update_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> CmdResult<()> {
+    let current = state.settings();
     // The library is opened at launch; moving it is not something to do from under it.
-    settings.library_dir = state.settings().library_dir;
+    settings.library_dir = current.library_dir;
+    // Set by connecting to Notion, which checks the token.
+    settings.notion.workspace = current.notion.workspace;
+    save_settings(&app, &state, settings)
+}
+
+fn save_settings(app: &AppHandle, state: &AppState, settings: Settings) -> CmdResult<()> {
     settings.save(&settings::settings_path()).map_err(to_string)?;
     *state.settings.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = settings;
     app.emit(SETTINGS_EVENT, ()).map_err(|e| e.to_string())
 }
 
+/// Checks a Notion token and keeps it in the Keychain. Returns the workspace's name.
 #[tauri::command]
-pub async fn open_settings(app: AppHandle) -> CmdResult<()> {
-    crate::open_settings(&app);
+pub async fn notion_connect(app: AppHandle, state: State<'_, AppState>, token: String) -> CmdResult<String> {
+    let workspace = blocking(move || {
+        let notion = Notion::new(&token)?;
+        let workspace = notion.workspace()?;
+        notion.save_token()?;
+        Ok(workspace)
+    })
+    .await?;
+    let mut settings = state.settings();
+    settings.notion.workspace = Some(workspace.clone());
+    save_settings(&app, &state, settings)?;
+    Ok(workspace)
+}
+
+#[tauri::command]
+pub async fn notion_disconnect(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    Notion::forget_token().map_err(to_string)?;
+    let mut settings = state.settings();
+    settings.notion.workspace = None;
+    save_settings(&app, &state, settings)
+}
+
+/// The Notion page a link points to, checking the integration can write in it.
+#[tauri::command]
+pub async fn notion_page(link: String) -> CmdResult<NotionPage> {
+    blocking(move || Notion::from_keychain()?.page(&link)).await
+}
+
+#[tauri::command]
+pub async fn set_folder_notion(state: State<'_, AppState>, name: String, page: Option<NotionPage>) -> CmdResult<()> {
+    state.library.set_folder_notion(&name, page).map_err(to_string)
+}
+
+/// A call's page in Notion: where it goes and at which level that was set, the call's own
+/// parent page, and the last sync.
+#[derive(Serialize)]
+pub struct NotionStatus {
+    destination: Option<Destination>,
+    call_parent: Option<NotionPage>,
+    synced: Option<Synced>,
+}
+
+fn notion_status_of(state: &AppState, id: &CallId) -> anyhow::Result<NotionStatus> {
+    let call = state.library.load(id)?;
+    let notion = state.library.notion(id);
+    let folder_parent = match &call.folder {
+        Some(name) => state.library.folders()?.into_iter().find(|f| &f.name == name).and_then(|f| f.notion),
+        None => None,
+    };
+    let default = state.settings().notion.parent;
+    Ok(NotionStatus {
+        destination: destination(notion.parent.as_ref(), folder_parent.as_ref(), default.as_ref()),
+        call_parent: notion.parent,
+        synced: notion.synced,
+    })
+}
+
+#[tauri::command]
+pub async fn notion_status(state: State<'_, AppState>, id: CallId) -> CmdResult<NotionStatus> {
+    notion_status_of(&state, &id).map_err(to_string)
+}
+
+/// Sets the call's own parent page, over its folder's, or clears it with `None`.
+#[tauri::command]
+pub async fn set_call_notion(
+    state: State<'_, AppState>,
+    id: CallId,
+    page: Option<NotionPage>,
+) -> CmdResult<NotionStatus> {
+    state.library.update_notion(&id, |n| n.parent = page).map_err(to_string)?;
+    notion_status_of(&state, &id).map_err(to_string)
+}
+
+/// Writes the call to its Notion page, named after it under its parent page (the call's,
+/// its folder's or the default one). Creates it the first time.
+#[tauri::command]
+pub async fn sync_notion(state: State<'_, AppState>, id: CallId) -> CmdResult<NotionStatus> {
+    let status = notion_status_of(&state, &id).map_err(to_string)?;
+    let Some(destination) = status.destination else {
+        return Err("Elegí en qué página de Notion va: la de su carpeta o la por defecto, en Ajustes → Notion".into());
+    };
+    let library = state.library.clone();
+    let call_id = id.clone();
+    blocking(move || {
+        let call = library.load(&call_id)?;
+        let transcript = library.transcript(&call_id)?;
+        let summary = Summary::load(&library.dir(&call_id))?;
+        let previous = library.notion(&call_id).synced;
+        let synced = Notion::from_keychain()?.sync(
+            &call,
+            transcript.as_ref(),
+            summary.as_ref(),
+            &destination.page.id,
+            previous.as_ref(),
+        )?;
+        library.update_notion(&call_id, |n| n.synced = Some(synced))?;
+        Ok(())
+    })
+    .await?;
+    notion_status_of(&state, &id).map_err(to_string)
+}
+
+#[tauri::command]
+pub async fn open_settings(app: AppHandle, page: Option<String>) -> CmdResult<()> {
+    crate::open_settings(&app, page.as_deref());
     Ok(())
 }
 

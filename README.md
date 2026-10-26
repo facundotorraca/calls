@@ -10,11 +10,18 @@ Requires macOS 15+ on Apple Silicon, Xcode (for Swift), Rust, pnpm, `brew instal
 and [Ollama](https://ollama.com) with a model (`ollama pull qwen3.5:35b`) for summaries.
 
 ```sh
-make setup   # JS deps + builds the sidecars + downloads models (~1.6 GB)
-make dev     # runs the app
+make setup     # JS deps + builds the sidecars + downloads models (~1.6 GB)
+make signing   # once: a local signing identity, so updates keep macOS permissions
+make install   # builds Calls.app and installs it in /Applications
+make dev       # runs the app from source
 ```
 
-`make build` produces `Calls.app` / `.dmg` in `target/release/bundle/`.
+To update: `git pull && make install`. It quits the running app (an ongoing recording is
+finalized), replaces it and opens the new one; calls, settings and models live in
+`~/Library/Application Support/calls` and are kept.
+
+`make build` produces `Calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
+icon from `scripts/make-icon.py`.
 `cargo run -p calls-cli -- doctor` checks what is installed.
 
 ## Architecture
@@ -59,8 +66,9 @@ finalizes the files and the call is processed on next launch.
 
 Permissions (asked the first time you record, by `Calls.app`): Microphone, and Screen & System
 Audio Recording (the "system audio only" kind). Dev builds run under your terminal, so macOS
-asks for it instead; test recording with `make build`. Ad-hoc signed builds may ask again
-after rebuilding.
+asks for it instead; test recording with `make install`. Builds signed with the identity from
+`make signing` keep the permissions; without it they are signed ad-hoc and macOS asks again
+after every update.
 
 ### Pipeline
 

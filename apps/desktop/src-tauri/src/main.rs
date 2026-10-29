@@ -5,6 +5,7 @@ mod commands;
 mod downloads;
 mod island;
 mod recorder;
+mod tray;
 
 use std::sync::{Arc, RwLock};
 
@@ -63,6 +64,7 @@ fn main() {
             app.manage(AppState { settings, library, queue, recorder, downloads: Downloads::default() });
 
             app.set_menu(menu(app.handle())?)?;
+            tray::create(app.handle())?;
             app.on_menu_event(|app, event| {
                 if event.id() == "settings" {
                     open_settings(app, None);

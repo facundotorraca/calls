@@ -500,7 +500,7 @@ impl Step for Summarize {
             dialogue(&transcript)
         );
         // What they wrote says what mattered to them; the transcript says what was said.
-        if let Some(notes) = Notes::load(&ctx.dir)?.to_prompt() {
+        if let Some(notes) = Notes::load(ctx.dir)?.to_prompt() {
             prompt.push_str(&format!(
                 "\n\nNotes {me} took about the call. Give weight to what they point at, but state \
                  only what the transcript supports; timestamps match the transcript's:\n{notes}",

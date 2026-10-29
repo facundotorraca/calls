@@ -20,6 +20,19 @@ To update: `git pull && make install`. It quits the running app (an ongoing reco
 finalized), replaces it and opens the new one; calls, settings and models live in
 `~/Library/Application Support/calls` and are kept.
 
+### Other Macs
+
+`make release` builds a `.dmg` in `target/release/bundle/dmg/`. On the other Mac: open it, drag
+Calls to Applications, `brew install ffmpeg uv`, download the models from Settings, and turn
+summaries off if it has no Ollama. How it opens depends on the signature:
+
+- **Personal** (`make signing`, free): the first time macOS blocks it; allow it in System
+  Settings > Privacy & Security > "Open Anyway". Later versions keep the permissions.
+- **Developer ID** (Apple Developer Program, USD 99/year): signed and notarized, it opens without
+  warnings, even on managed Macs. Needs, once, a "Developer ID Application" certificate (Xcode >
+  Settings > Accounts > Manage Certificates > +) and `make notary`, which saves your Apple ID,
+  team ID and an app-specific password (appleid.apple.com) in the keychain.
+
 `make build` produces `Calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
 icon from `scripts/make-icon.py`.
 `cargo run -p calls-cli -- doctor` checks what is installed.

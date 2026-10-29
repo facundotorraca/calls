@@ -15,7 +15,7 @@ use calls_engines::audio::{AudioDaemon, AudioEvent};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{AppState, LIBRARY_EVENT, island};
+use crate::{AppState, LIBRARY_EVENT, island, tray};
 
 const ISLAND_EVENT: &str = "island";
 const LEVELS_EVENT: &str = "audio_levels";
@@ -242,6 +242,7 @@ fn set_island(app: &AppHandle, s: &mut State, island: Island) {
     let was_hidden = s.island == Island::Hidden;
     s.island = island;
     let _ = app.emit(ISLAND_EVENT, &s.island);
+    tray::set_recording(app, matches!(s.island, Island::Recording { .. }));
     match (&s.island, was_hidden) {
         (Island::Hidden, _) => island::hide(app),
         (_, true) => island::show(app),

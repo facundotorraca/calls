@@ -1,6 +1,7 @@
 """Draws the app icon: the wordmark's "c" in Doto, with the signal square as
 its full stop, on ftor's near-black over a faint dot grid. Writes a 1024px
-PNG that `tauri icon` turns into every size.
+PNG that `tauri icon` turns into every size, and next to it the menu bar
+icons (tray.png, tray-recording.png).
 
     uv run --no-project --with pillow scripts/make-icon.py <out.png>
 """
@@ -58,20 +59,49 @@ def icon() -> Image.Image:
     tile = Image.new("RGBA", (N, N), BACKGROUND + (255,))
     tile = Image.alpha_composite(tile, dot_grid())
 
-    draw = ImageDraw.Draw(tile)
     font = ImageFont.truetype(str(FONT), 620 * SCALE)
     font.set_variation_by_axes([0, 900])  # roundness, weight: as .wordmark renders
-    centre = N / 2
-    draw.text((centre, centre + 10 * SCALE), "c", font=font, fill=FOREGROUND, anchor="mm")
+    glyph = Image.new("L", (N, N), 0)
+    ImageDraw.Draw(glyph).text((0, 0), "c", font=font, fill=255)
+    left, top, right, bottom = glyph.getbbox()  # the ink, not the em box
 
-    side = 64 * SCALE
-    x, y = centre + 150 * SCALE, centre + 120 * SCALE
-    draw.rectangle([x, y, x + side, y + side], fill=SIGNAL)
+    # "c." as a group, centred in the canvas; the square sits on the baseline.
+    side, gap = 64 * SCALE, 24 * SCALE
+    x = (N - (right - left + gap + side)) // 2 - left
+    y = (N - (bottom - top)) // 2 - top
+    tile.paste(FOREGROUND, (x, y, x + N, y + N), glyph)
+    dot_x, dot_y = x + right + gap, y + bottom - side
+    ImageDraw.Draw(tile).rectangle([dot_x, dot_y, dot_x + side - 1, dot_y + side - 1], fill=SIGNAL)
 
     out = Image.new("RGBA", (N, N), (0, 0, 0, 0))
     out.paste(tile, (0, 0), mask)
     return out.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# The "c" as Doto draws it, one dot per cell.
+C = [".###.", "#...#", "#....", "#...#", ".###."]
+
+
+def tray(recording: bool) -> Image.Image:
+    """Menu bar icon, at 2x of macOS's 18pt height. Black on transparent: macOS uses it
+    as a template and tints it for the menu bar. The square, the full stop, only shows
+    while recording."""
+    pitch, dot = 6, 5
+    width, height = 2 + 6 * pitch + 2, 36
+    out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(out)
+    cells = [(col, row) for row, line in enumerate(C) for col, c in enumerate(line) if c == "#"]
+    if recording:
+        cells.append((5, 4))
+    top = (height - (len(C) * pitch - 1)) // 2
+    for col, row in cells:
+        x, y = 2 + col * pitch, top + row * pitch
+        draw.rectangle([x, y, x + dot - 1, y + dot - 1], fill=(0, 0, 0, 255))
+    return out
+
+
 if __name__ == "__main__":
-    icon().save(sys.argv[1])
+    out = Path(sys.argv[1])
+    icon().save(out)
+    tray(recording=False).save(out.with_name("tray.png"))
+    tray(recording=True).save(out.with_name("tray-recording.png"))

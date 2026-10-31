@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Calls.app and installs it in /Applications, replacing the old one.
+# Builds ftor-calls.app and installs it in /Applications, replacing the old one.
 # Settings, models and calls live in ~/Library/Application Support/calls, so
 # they survive. To update: git pull && make install
 #   usage: scripts/install.sh
@@ -7,8 +7,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 identity="Calls Local Signing"
-app="/Applications/Calls.app"
-built="$root/target/release/bundle/macos/Calls.app"
+app="/Applications/ftor-calls.app"
+# Its name before it was ftor-calls; removed so there are not two.
+old="/Applications/Calls.app"
+built="$root/target/release/bundle/macos/ftor-calls.app"
 
 if security find-identity -v -p codesigning | grep -q "\"$identity\""; then
   export APPLE_SIGNING_IDENTITY="$identity"
@@ -21,12 +23,12 @@ fi
 
 # Quitting normally lets an ongoing recording finalize its files.
 if pgrep -xq calls-desktop; then
-  echo "quitting Calls..."
-  osascript -e 'quit app "Calls"'
+  echo "quitting ftor-calls..."
+  osascript -e 'quit app id "dev.facundotorraca.calls"'
   while pgrep -xq calls-desktop; do sleep 0.5; done
 fi
 
-rm -rf "$app"
+rm -rf "$app" "$old"
 ditto "$built" "$app"
 echo "installed $app ($(git -C "$root" describe --always --dirty))"
 open "$app"

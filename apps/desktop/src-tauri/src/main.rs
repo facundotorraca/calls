@@ -6,6 +6,7 @@ mod downloads;
 mod island;
 mod recorder;
 mod tray;
+mod updater;
 
 use std::sync::{Arc, RwLock};
 
@@ -50,6 +51,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let loaded = Settings::load_or_default(&settings::settings_path())?;
             let library = Library::open(&loaded.library_dir)?;
@@ -65,6 +67,7 @@ fn main() {
 
             app.set_menu(menu(app.handle())?)?;
             tray::create(app.handle())?;
+            updater::spawn(app.handle());
             app.on_menu_event(|app, event| {
                 if event.id() == "settings" {
                     open_settings(app, None);

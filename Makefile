@@ -1,4 +1,4 @@
-.PHONY: setup deps sidecars models signing dev build install ci-release icon cli check
+.PHONY: setup deps sidecars models dev build install ci-release icon cli check
 
 ## First time setup: everything needed to run the app.
 setup: deps sidecars models
@@ -21,10 +21,6 @@ dev:
 ## Builds ftor-calls.app and a .dmg into target/release/bundle.
 build:
 	cd apps/desktop && pnpm tauri build
-
-## Creates the local signing identity `install` signs with (asks for your password once).
-signing:
-	./scripts/setup-signing.sh
 
 ## Builds ftor-calls.app and installs it in /Applications. To update: `git pull && make install`.
 install:

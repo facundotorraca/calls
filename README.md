@@ -20,12 +20,11 @@ Needs Xcode (for Swift), Rust, pnpm and `brew install cmake ffmpeg uv`.
 ```sh
 make setup     # JS deps + builds the sidecars + downloads models (~1.6 GB)
 make dev       # runs the app from source
-make signing   # once: a local signing identity, so local builds keep macOS permissions
 make install   # builds ftor-calls.app from source and installs it in /Applications
 ```
 
-A source build and a release are signed differently, so switching between them asks for the
-macOS permissions again.
+`make install` signs with your Developer ID certificate, the same as releases, so a source
+build and a release share the macOS permissions.
 
 ### Releases
 
@@ -81,9 +80,9 @@ finalizes the files and the call is processed on next launch.
 
 Permissions (asked the first time you record, by `ftor-calls.app`): Microphone, and Screen & System
 Audio Recording (the "system audio only" kind). Dev builds run under your terminal, so macOS
-asks for it instead; test recording with `make install`. Builds signed with the identity from
-`make signing` keep the permissions; without it they are signed ad-hoc and macOS asks again
-after every update.
+asks for it instead; test recording with `make install`. Builds signed with Developer ID (releases and
+`make install`) keep the permissions; without the certificate `make install` signs ad-hoc and
+macOS asks again after every update.
 
 ### Pipeline
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Uploads the release CI just built to apps.ftor.dev (ftor's ADR 0010): the versioned files
-# first, then latest.json (what installed apps update from) and manifest.json (what ftor
-# lists) last, so a run that dies half way never points anything at missing files.
+# first, then releases.json (every version, what ftor's history lists), latest.json (what
+# installed apps update from) and manifest.json (what ftor lists) last, so a run that dies
+# half way never points anything at missing files.
 # Runs in run-release after `tauri build`; R2_* and the build come from the steps before it.
 #   usage: scripts/publish.sh
 set -euo pipefail
@@ -51,13 +52,43 @@ export AWS_DEFAULT_REGION=auto
 put() { aws s3 cp --endpoint-url "$R2_ENDPOINT" --only-show-errors "$@"; }
 dest="s3://$R2_BUCKET/$slug"
 
+# Copies an object from the bucket into a file, or returns 1 when there is no such object.
+# Any other failure stops the release: "could not read the list" taken as "there is no list"
+# would publish a history with every earlier version missing.
+fetch() {
+  local err
+  if ! err="$(aws s3 cp --endpoint-url "$R2_ENDPOINT" --only-show-errors "$1" "$2" 2>&1)"; then
+    case "$err" in
+      *"(404)"* | *NoSuchKey*) return 1 ;;
+      *) echo "$err" >&2 && exit 1 ;;
+    esac
+  fi
+}
+
+# Every release, newest first, each entry the manifest it shipped with. The bucket cannot be
+# listed, so the history is a file this release goes on top of. The first one starts from the
+# release manifest.json still points at, so what shipped before the file existed is kept; a
+# version published again replaces its own entry. Read before anything is uploaded, so a list
+# that is not one stops the run with the bucket untouched.
+if fetch "$dest/releases.json" "$out/previous.json"; then
+  :
+elif fetch "$dest/manifest.json" "$out/current.json"; then
+  jq '[.]' "$out/current.json" >"$out/previous.json"
+else
+  echo '[]' >"$out/previous.json"
+fi
+jq --slurpfile release "$out/manifest.json" \
+  '$release + map(select(.version != $release[0].version))' "$out/previous.json" >"$out/releases.json"
+
 # A version's files never change, so they can be cached forever; the pointers must not be.
 forever="public, max-age=31536000, immutable"
 fresh="no-cache"
 put "$dmg" "$dest/$version/$(basename "$dmg")" --cache-control "$forever"
 put "$update" "$dest/$version/$name.app.tar.gz" --cache-control "$forever"
+put "$out/manifest.json" "$dest/$version/manifest.json" --cache-control "$forever" --content-type application/json
 put "$out/icon.png" "$dest/icon.png" --cache-control "$fresh"
 put "$dmg" "$dest/$name.dmg" --cache-control "$fresh"
+put "$out/releases.json" "$dest/releases.json" --cache-control "$fresh" --content-type application/json
 put "$out/latest.json" "$dest/latest.json" --cache-control "$fresh" --content-type application/json
 put "$out/manifest.json" "$dest/manifest.json" --cache-control "$fresh" --content-type application/json
 

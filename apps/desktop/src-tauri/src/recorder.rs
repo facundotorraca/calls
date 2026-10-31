@@ -27,8 +27,14 @@ const DONE_VISIBLE_FOR: Duration = Duration::from_secs(8);
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Island {
     Hidden,
-    Detected { app_name: String },
-    Recording { call_id: CallId, app_name: Option<String>, started_at_ms: u64 },
+    Detected {
+        app_name: String,
+    },
+    Recording {
+        call_id: CallId,
+        app_name: Option<String>,
+        started_at_ms: u64,
+    },
     Processing {
         call_id: CallId,
         step: String,
@@ -36,7 +42,12 @@ pub enum Island {
         /// Some step was left for later (the summary, when there was no memory for it).
         postponed: bool,
     },
-    Done { call_id: CallId, title: String, failed: bool, postponed: bool },
+    Done {
+        call_id: CallId,
+        title: String,
+        failed: bool,
+        postponed: bool,
+    },
 }
 
 struct Recording {

@@ -4,36 +4,43 @@ Local transcription of calls. When a call starts (Zoom, Meet, Teams...) an islan
 the top of the screen to record it; when it ends, you get a transcript with who said what.
 You can also drop any existing recording on the app. Everything runs on your machine.
 
-## Setup
+## Install
 
-Requires macOS 15+ on Apple Silicon, Xcode (for Swift), Rust, pnpm, `brew install cmake ffmpeg uv`,
-and [Ollama](https://ollama.com) with a model (`ollama pull qwen3.5:35b`) for summaries.
+Requires macOS 15+ on Apple Silicon. Download [ftor-calls.dmg](https://apps.ftor.dev/calls/ftor-calls.dmg)
+(also on ftor's home page), open it and drag ftor-calls to Applications. Then `brew install ffmpeg uv`, download the models from Settings, and for
+summaries install [Ollama](https://ollama.com) with a model (`ollama pull qwen3.5:35b`), or turn
+them off. Updates install themselves: the menu bar icon offers to restart into a new version
+(never during a recording). Calls, settings and models live in
+`~/Library/Application Support/calls`.
+
+## Development
+
+Needs Xcode (for Swift), Rust, pnpm and `brew install cmake ffmpeg uv`.
 
 ```sh
 make setup     # JS deps + builds the sidecars + downloads models (~1.6 GB)
-make signing   # once: a local signing identity, so updates keep macOS permissions
-make install   # builds Calls.app and installs it in /Applications
 make dev       # runs the app from source
+make install   # builds ftor-calls.app from source and installs it in /Applications
 ```
 
-To update: `git pull && make install`. It quits the running app (an ongoing recording is
-finalized), replaces it and opens the new one; calls, settings and models live in
-`~/Library/Application Support/calls` and are kept.
+`make install` signs with your Developer ID certificate, the same as releases, so a source
+build and a release share the macOS permissions.
 
-### Other Macs
+### Releases
 
-`make release` builds a `.dmg` in `target/release/bundle/dmg/`. On the other Mac: open it, drag
-Calls to Applications, `brew install ffmpeg uv`, download the models from Settings, and turn
-summaries off if it has no Ollama. How it opens depends on the signature:
+All in GitHub Actions:
 
-- **Personal** (`make signing`, free): the first time macOS blocks it; allow it in System
-  Settings > Privacy & Security > "Open Anyway". Later versions keep the permissions.
-- **Developer ID** (Apple Developer Program, USD 99/year): signed and notarized, it opens without
-  warnings, even on managed Macs. Needs, once, a "Developer ID Application" certificate (Xcode >
-  Settings > Accounts > Manage Certificates > +) and `make notary`, which saves your Apple ID,
-  team ID and an app-specific password (appleid.apple.com) in the keychain.
+- [`ci-app`](.github/workflows/ci-app.yml): `make check` on every push to main and every pull
+  request.
+- [`run-release`](.github/workflows/run-release.yml): **Actions > run-release > Run workflow**
+  (patch, minor or major). Bumps the version, builds ftor-calls.app, signs it with Developer ID,
+  notarizes it and publishes it to `apps.ftor.dev/calls/`, where installed apps update from and
+  ftor lists it; then commits the version and tags it. A failed run commits nothing.
 
-`make build` produces `Calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
+Everything around a release (the bucket, the Infisical secrets it reads over OIDC, the signing
+certificate and the updater key) lives in ftor: `ops/terraform/apps.tf` and its ADR 0010.
+
+`make build` produces `ftor-calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
 icon from `scripts/make-icon.py`.
 `cargo run -p calls-cli -- doctor` checks what is installed.
 
@@ -77,11 +84,11 @@ Without headphones the other side leaks into your mic; the transcribe step drops
 that repeat the other side at the same time. If the app quits mid-recording, the sidecar
 finalizes the files and the call is processed on next launch.
 
-Permissions (asked the first time you record, by `Calls.app`): Microphone, and Screen & System
+Permissions (asked the first time you record, by `ftor-calls.app`): Microphone, and Screen & System
 Audio Recording (the "system audio only" kind). Dev builds run under your terminal, so macOS
-asks for it instead; test recording with `make install`. Builds signed with the identity from
-`make signing` keep the permissions; without it they are signed ad-hoc and macOS asks again
-after every update.
+asks for it instead; test recording with `make install`. Builds signed with Developer ID (releases and
+`make install`) keep the permissions; without the certificate `make install` signs ad-hoc and
+macOS asks again after every update.
 
 ### Pipeline
 

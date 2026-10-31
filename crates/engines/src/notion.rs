@@ -437,7 +437,13 @@ mod tests {
                 "heading_2"
             ]
         );
-        assert_eq!(plain(&blocks[0]["paragraph"]["rich_text"]), "23/10/2026 10:02 · 3 min · Acme · Ana, Yo");
+        // The page shows the call's time where it is read, so the expected hour depends on the
+        // machine's zone (10:02 in Buenos Aires, 13:02 on a UTC runner).
+        let start = chrono::DateTime::parse_from_rfc3339("2026-10-23T10:02:25-03:00").unwrap().with_timezone(&Local);
+        assert_eq!(
+            plain(&blocks[0]["paragraph"]["rich_text"]),
+            format!("{} · 3 min · Acme · Ana, Yo", start.format("%d/%m/%Y %H:%M"))
+        );
         assert_eq!(blocks[7]["to_do"]["checked"], true);
         assert_eq!(plain(&blocks[8]["to_do"]["rich_text"]), "Revisar (viernes)");
         assert_eq!(blocks[8]["to_do"]["checked"], false);

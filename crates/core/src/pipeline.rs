@@ -50,13 +50,32 @@ impl std::error::Error for Postponed {}
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Event {
-    StepStarted { call_id: CallId, step: String },
-    StepProgress { call_id: CallId, step: String, fraction: f32 },
+    StepStarted {
+        call_id: CallId,
+        step: String,
+    },
+    StepProgress {
+        call_id: CallId,
+        step: String,
+        fraction: f32,
+    },
     /// Left for later (see [`Postponed`]); the call is processed without it.
-    StepPostponed { call_id: CallId, step: String },
-    StepFinished { call_id: CallId, step: String },
-    Finished { call_id: CallId },
-    Failed { call_id: CallId, step: String, error: String },
+    StepPostponed {
+        call_id: CallId,
+        step: String,
+    },
+    StepFinished {
+        call_id: CallId,
+        step: String,
+    },
+    Finished {
+        call_id: CallId,
+    },
+    Failed {
+        call_id: CallId,
+        step: String,
+        error: String,
+    },
 }
 
 #[derive(Default)]
@@ -196,8 +215,7 @@ mod tests {
         let library = Library::open(tmp.join("lib")).unwrap();
         fs::write(tmp.join("call.mkv"), b"x").unwrap();
         let call = library.import(&tmp.join("call.mkv")).unwrap();
-        let pipeline =
-            Pipeline::new().with(Heavy).with(Flaky { runs: AtomicUsize::new(0), fail_first: false });
+        let pipeline = Pipeline::new().with(Heavy).with(Flaky { runs: AtomicUsize::new(0), fail_first: false });
 
         // The call is ready without it, and the steps after it still ran.
         pipeline.run(&library, &call.id, false, &|_| {}).unwrap();

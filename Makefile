@@ -1,4 +1,4 @@
-.PHONY: setup deps sidecars models signing notary dev build install release icon cli check
+.PHONY: setup deps sidecars models dev build install icon cli check
 
 ## First time setup: everything needed to run the app.
 setup: deps sidecars models
@@ -18,25 +18,13 @@ models:
 dev:
 	cd apps/desktop && pnpm tauri dev
 
-## Builds Calls.app and a .dmg into target/release/bundle.
+## Builds ftor-calls.app and a .dmg into target/release/bundle.
 build:
 	cd apps/desktop && pnpm tauri build
 
-## Creates the local signing identity `install` signs with (asks for your password once).
-signing:
-	./scripts/setup-signing.sh
-
-## Saves the Developer ID notarization credentials `release` uses (once).
-notary:
-	./scripts/setup-notary.sh
-
-## Builds Calls.app and installs it in /Applications. To update: `git pull && make install`.
+## Builds ftor-calls.app and installs it in /Applications. To update: `git pull && make install`.
 install:
 	./scripts/install.sh
-
-## Builds a .dmg to install on other Macs (notarized if `make notary` was set up).
-release:
-	./scripts/release.sh
 
 ## Redraws the app icon (scripts/make-icon.py) and every size Tauri needs.
 icon:

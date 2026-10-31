@@ -4,8 +4,8 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Calls graba tu voz durante las llamadas para transcribirlas.</string>
+  <string>ftor-calls graba tu voz durante las llamadas para transcribirlas.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Calls graba el audio de la app de la llamada (la otra parte) para transcribirlo.</string>
+  <string>ftor-calls graba el audio de la app de la llamada (la otra parte) para transcribirlo.</string>
 </dict>
 </plist>

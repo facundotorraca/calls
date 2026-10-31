@@ -127,7 +127,8 @@ mod tests {
 
     #[test]
     fn prompt_lists_the_moments() {
-        let notes = Notes { text: " ojo con el plazo ".into(), marks: vec![Mark { at_ms: 65_000, text: String::new() }] };
+        let notes =
+            Notes { text: " ojo con el plazo ".into(), marks: vec![Mark { at_ms: 65_000, text: String::new() }] };
         assert_eq!(notes.to_prompt().unwrap(), "ojo con el plazo\nMoments they marked as important:\n[01:05]\n");
         assert_eq!(Notes::default().to_prompt(), None);
     }

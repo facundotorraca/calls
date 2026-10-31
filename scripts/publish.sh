@@ -2,7 +2,7 @@
 # Uploads the release CI just built to apps.ftor.dev (ftor's ADR 0010): the versioned files
 # first, then latest.json (what installed apps update from) and manifest.json (what ftor
 # lists) last, so a run that dies half way never points anything at missing files.
-# Runs in CI after `tauri build`; R2_* and the build come from the steps before it.
+# Runs in run-release after `tauri build`; R2_* and the build come from the steps before it.
 #   usage: scripts/publish.sh
 set -euo pipefail
 
@@ -19,15 +19,14 @@ dmg="$bundle/dmg/${name}_${version}_aarch64.dmg"
 update="$bundle/macos/$name.app.tar.gz"
 url="$R2_PUBLIC_URL/$slug"
 
-if [ "${GITHUB_REF_NAME:-v$version}" != "v$version" ]; then
-  echo "error: tag $GITHUB_REF_NAME but tauri.conf.json says $version." >&2
-  exit 1
+# The commits since the previous release. run-release tags only after publishing, so the
+# last tag is the previous version and HEAD is what is being released.
+# The first one has no previous version to compare with.
+if previous="$(git -C "$root" describe --tags --abbrev=0 2>/dev/null)"; then
+  notes="$(git -C "$root" log --no-merges --format='- %s' "$previous..HEAD" | grep -v "^- release v" || true)"
+else
+  notes="First release."
 fi
-
-# The commits since the previous release, without the version bump itself.
-previous="$(git -C "$root" describe --tags --abbrev=0 "v$version^" 2>/dev/null || true)"
-notes="$(git -C "$root" log --no-merges --format='- %s' ${previous:+"$previous.."}"v$version" 2>/dev/null |
-  grep -v "^- release v" || true)"
 
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT

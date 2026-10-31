@@ -217,7 +217,8 @@ fn spawn_queue(app: AppHandle, library: Library, settings: SharedSettings) -> Qu
             let _ = app.emit(PIPELINE_EVENT, event);
         };
         // Read for every call, so a model chosen in the settings applies to the next one.
-        let result = default_pipeline(&read(&settings)).and_then(|pipeline| pipeline.run(&library, id, on_demand, &emit));
+        let result =
+            default_pipeline(&read(&settings)).and_then(|pipeline| pipeline.run(&library, id, on_demand, &emit));
         if let Err(e) = result {
             eprintln!("{id}: {e:#}");
             mark_failed_if_unhandled(&library, id, &e, &emit);

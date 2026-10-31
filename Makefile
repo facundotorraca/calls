@@ -1,4 +1,4 @@
-.PHONY: setup deps sidecars models dev build install ci-release icon cli check
+.PHONY: setup deps sidecars models dev build install icon cli check
 
 ## First time setup: everything needed to run the app.
 setup: deps sidecars models
@@ -25,10 +25,6 @@ build:
 ## Builds ftor-calls.app and installs it in /Applications. To update: `git pull && make install`.
 install:
 	./scripts/install.sh
-
-## Publishes a new version (next patch, or VERSION=x.y.z) to apps.ftor.dev; installed apps update.
-ci-release:
-	./scripts/ci-release.sh $(VERSION)
 
 ## Redraws the app icon (scripts/make-icon.py) and every size Tauri needs.
 icon:

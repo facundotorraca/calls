@@ -1,0 +1,40 @@
+# Every push to main and every pull request: `make check` (fmt, clippy, tests, tsc), the same
+# command as locally.
+name: ci-app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+
+      - name: Frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: apps/desktop
+      # tauri-build only checks the sidecars exist; building the real ones (whisper.cpp, Swift)
+      # is run-release's job, and would triple this one.
+      - name: Sidecar stand-ins
+        run: |
+          mkdir -p apps/desktop/src-tauri/binaries
+          for bin in whisper-cli calls-audio; do touch "apps/desktop/src-tauri/binaries/$bin-aarch64-apple-darwin"; done
+
+      - run: make check

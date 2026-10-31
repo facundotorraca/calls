@@ -1,25 +1,55 @@
-# Publishes a release when a version tag is pushed (`make ci-release`): ftor-calls.app signed
-# with Developer ID and notarized, uploaded to apps.ftor.dev, where installed apps update
-# from and ftor lists it. Infra and secrets live in ftor (ops/terraform/apps.tf, ADR 0010);
-# this workflow logs in to Infisical over OIDC and holds no secret of its own.
-name: release
+# One-click release: Actions > run-release > Run workflow. Bumps the version, builds
+# ftor-calls.app, signs it with Developer ID, notarizes it and publishes it to apps.ftor.dev,
+# where installed apps update from and ftor lists it; then commits the version and tags it.
+# Nothing is committed if any step fails. Infra and secrets live in ftor (ops/terraform/apps.tf,
+# ADR 0010): this logs in to Infisical over OIDC and holds no secret of its own.
+name: run-release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version goes up
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+# One release at a time: two would compute the same version.
+concurrency:
+  group: run-release
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write # the version commit and its tag
   id-token: write # the OIDC token Infisical checks
 
 jobs:
-  macos:
+  release:
+    # Infisical only accepts this workflow, on main (ops/terraform/apps.tf).
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: true
           fetch-depth: 0 # the previous tag, for the release notes
+
+      - name: Version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          conf=apps/desktop/src-tauri/tauri.conf.json
+          current="$(plutil -extract version raw "$conf")"
+          IFS=. read -r major minor patch <<<"$current"
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            *) version="$major.$minor.$((patch + 1))" ;;
+          esac
+          sed -i '' "s/^  \"version\": \"$current\"/  \"version\": \"$version\"/" "$conf"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "### $current → $version" >>"$GITHUB_STEP_SUMMARY"
 
       # Each call exports one folder as environment variables for the steps below.
       - name: Secrets (/apple)
@@ -74,3 +104,13 @@ jobs:
 
       - name: Publish
         run: ./scripts/publish.sh
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "release v$VERSION" -- apps/desktop/src-tauri/tauri.conf.json
+          git tag "v$VERSION"
+          git push origin HEAD:main "v$VERSION"

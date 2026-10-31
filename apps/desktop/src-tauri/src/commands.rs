@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::bail;
-use calls_core::notion::{Destination, NotionPage, Synced, destination};
-use calls_core::steps::{self, PLAYBACK_FILE};
 use calls_core::notes::Notes;
+use calls_core::notion::{Destination, NotionPage, Synced, destination};
 use calls_core::search::{self, SearchResult};
+use calls_core::steps::{self, PLAYBACK_FILE};
 use calls_core::summary::Summary;
 use calls_core::voices::MyVoice;
 use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript, settings};

@@ -28,11 +28,17 @@ build and a release share the macOS permissions.
 
 ### Releases
 
-`make ci-release` bumps the version (next patch, or `make ci-release VERSION=1.0.0`), tags it and
-pushes. [CI](.github/workflows/release.yml) builds ftor-calls.app, signs it with Developer ID,
-notarizes it and publishes it to `apps.ftor.dev/calls/`, where installed apps update from and
-ftor lists it. Everything around that (the bucket, the Infisical secrets CI reads over OIDC, the
-signing certificate and the updater key) lives in ftor: `ops/terraform/apps.tf` and its ADR 0010.
+All in GitHub Actions:
+
+- [`ci-app`](.github/workflows/ci-app.yml): `make check` on every push to main and every pull
+  request.
+- [`run-release`](.github/workflows/run-release.yml): **Actions > run-release > Run workflow**
+  (patch, minor or major). Bumps the version, builds ftor-calls.app, signs it with Developer ID,
+  notarizes it and publishes it to `apps.ftor.dev/calls/`, where installed apps update from and
+  ftor lists it; then commits the version and tags it. A failed run commits nothing.
+
+Everything around a release (the bucket, the Infisical secrets it reads over OIDC, the signing
+certificate and the updater key) lives in ftor: `ops/terraform/apps.tf` and its ADR 0010.
 
 `make build` produces `ftor-calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
 icon from `scripts/make-icon.py`.

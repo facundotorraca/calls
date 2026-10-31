@@ -55,8 +55,11 @@ pub fn set_recording(app: &AppHandle, recording: bool) {
         return;
     }
     tray.recording = recording;
-    let (icon, label, tooltip) =
-        if recording { (RECORDING, "Detener grabación", "ftor-calls · grabando") } else { (IDLE, "Grabar", "ftor-calls") };
+    let (icon, label, tooltip) = if recording {
+        (RECORDING, "Detener grabación", "ftor-calls · grabando")
+    } else {
+        (IDLE, "Grabar", "ftor-calls")
+    };
     let _ = tray.icon.set_icon(Image::from_bytes(icon).ok());
     let _ = tray.icon.set_icon_as_template(true);
     let _ = tray.icon.set_tooltip(Some(tooltip));

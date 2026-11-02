@@ -449,9 +449,11 @@ name = "calls-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "block2",
  "calls-core",
  "calls-engines",
  "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

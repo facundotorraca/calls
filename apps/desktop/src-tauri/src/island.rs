@@ -1,6 +1,7 @@
 //! The island: a small floating window at the top center of the screen, like the Dynamic
 //! Island. It must show over full screen apps (a full screen Zoom call), never steal focus
-//! and stay out of screen shares. It can be dragged elsewhere; it comes back there.
+//! and stay out of screen shares. It can be dragged elsewhere; it comes back there. It stays
+//! when the app is hidden (⌘H, or "hide others" from the call) and when its screen goes away.
 
 use std::fs;
 use std::path::PathBuf;
@@ -33,13 +34,36 @@ pub fn configure(app: &AppHandle) {
     if let Some(window) = window(app)
         && let Ok(ptr) = window.ns_window()
     {
-        use objc2_app_kit::{NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior as B, NSWindowSharingType};
+        use objc2_app_kit::{
+            NSApplicationDidChangeScreenParametersNotification, NSStatusWindowLevel, NSWindow,
+            NSWindowCollectionBehavior as B, NSWindowSharingType,
+        };
+        use objc2_foundation::{NSNotification, NSNotificationCenter};
         // SAFETY: Tauri hands us the live NSWindow of this webview window, and setup runs on the main thread.
         let ns_window = unsafe { &*ptr.cast::<NSWindow>() };
         ns_window.setLevel(NSStatusWindowLevel);
         ns_window.setCollectionBehavior(B::CanJoinAllSpaces | B::FullScreenAuxiliary | B::Stationary | B::IgnoresCycle);
         // Left out of screenshots and screen shares: it is for the person recording only.
         ns_window.setSharingType(NSWindowSharingType::None);
+        // Hiding the app hides all its windows, and the island is the one that must not go:
+        // it is how the recording is seen and stopped.
+        ns_window.setCanHide(false);
+
+        // A screen unplugged with the island on it leaves it off screen: borderless windows
+        // are not brought back by the system.
+        let app = app.clone();
+        let on_change = block2::RcBlock::new(move |_: std::ptr::NonNull<NSNotification>| keep_on_screen(&app));
+        // SAFETY: no object filter, and the block runs on the posting thread, AppKit's main thread.
+        let observer = unsafe {
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(NSApplicationDidChangeScreenParametersNotification),
+                None,
+                None,
+                &on_change,
+            )
+        };
+        // Observes for as long as the app runs.
+        std::mem::forget(observer);
     }
 }
 
@@ -79,6 +103,18 @@ pub fn resize(app: &AppHandle, width: f64, height: f64) {
     let place = current(&window);
     let _ = window.set_size(LogicalSize::new(width, height));
     if let Some(place) = place {
+        move_to(&window, place);
+    }
+}
+
+/// Brings the island back if it is off every screen: to where it was dragged, if that screen
+/// is still there, or to the top center.
+fn keep_on_screen(app: &AppHandle) {
+    let Some(window) = window(app) else { return };
+    if !window.is_visible().unwrap_or(false) || current(&window).is_some_and(|p| on_a_monitor(&window, p)) {
+        return;
+    }
+    if let Some(place) = saved().filter(|p| on_a_monitor(&window, *p)).or_else(|| default_place(&window)) {
         move_to(&window, place);
     }
 }
@@ -139,10 +175,17 @@ fn default_place(window: &WebviewWindow) -> Option<Place> {
 
 /// Whether the place is on a screen still connected, so the island is never lost off screen.
 fn on_a_monitor(window: &WebviewWindow, place: Place) -> bool {
-    window.available_monitors().unwrap_or_default().iter().any(|monitor| {
-        let (x, y, width, height) = work_area(monitor);
-        (x..x + width).contains(&place.center_x) && (y..y + height).contains(&place.y)
-    })
+    screen_of(window, place).is_some()
+}
+
+/// The work area of the screen the place is on, if it is on one.
+fn screen_of(window: &WebviewWindow, place: Place) -> Option<(f64, f64, f64, f64)> {
+    window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(work_area)
+        .find(|&(x, y, width, height)| (x..x + width).contains(&place.center_x) && (y..y + height).contains(&place.y))
 }
 
 /// A monitor's work area (without menu bar and Dock) in logical points: x, y, width, height.

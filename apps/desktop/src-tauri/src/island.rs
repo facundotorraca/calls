@@ -97,14 +97,22 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
-/// Fits the window to what the island shows, keeping it centered where it is.
+/// Fits the window to what the island shows, keeping it centered where it is. Grown into the
+/// notes panel near an edge, it moves in as much as it needs to stay whole on the screen.
 pub fn resize(app: &AppHandle, width: f64, height: f64) {
     let Some(window) = window(app) else { return };
     let place = current(&window);
     let _ = window.set_size(LogicalSize::new(width, height));
     if let Some(place) = place {
-        move_to(&window, place);
+        move_to(&window, within_screen(&window, place, width, height));
     }
+}
+
+/// The place, moved in so a window of this size fits the screen it is on.
+fn within_screen(window: &WebviewWindow, place: Place, width: f64, height: f64) -> Place {
+    let Some((x, y, w, h)) = screen_of(window, place) else { return place };
+    let half = width / 2.0;
+    Place { center_x: place.center_x.min(x + w - half).max(x + half), y: place.y.min(y + h - height).max(y) }
 }
 
 /// Brings the island back if it is off every screen: to where it was dragged, if that screen

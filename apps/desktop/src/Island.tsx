@@ -1,18 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, onIsland, onLevels, type Island as IslandState } from "./api";
+import { api, isImagePath, onIsland, onLevels, onNotesChanged, type CallId, type Island as IslandState } from "./api";
 import { formatTimestamp, stepLabel } from "./format";
+import { NoteEditor, type NoteEditorHandle } from "./NoteEditor";
 import { popupMenu, usePersistentState } from "./ui";
 
 type Orientation = "horizontal" | "vertical";
 
 /** The floating pill at the top of the screen. Rust decides its state; this only renders it.
  * It can be dragged anywhere (double click puts it back), folded down to the essentials and
- * stood upright, to sit along a side of the screen. Right click has the options. */
+ * stood upright, to sit along a side of the screen. While recording it opens into a small
+ * panel to take the call's notes over it. Right click has the options. */
 export function Island() {
   const [island, setIsland] = useState<IslandState>({ kind: "hidden" });
   const [folded, setFolded] = usePersistentState("island.folded", false);
   const [orientation, setOrientation] = usePersistentState<Orientation>("island.orientation", "horizontal");
+  const [notesOpen, setNotesOpen] = usePersistentState("island.notes", false);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,13 +38,14 @@ export function Island() {
   }, []);
 
   const drag = (e: MouseEvent) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button, textarea")) return;
     if (e.detail === 2) void api.islandResetPlace();
     else void getCurrentWindow().startDragging();
   };
 
   // Only what runs for a while folds; asking and telling need their buttons.
   const foldable = island.kind === "recording" || island.kind === "processing";
+  const notes = island.kind === "recording" && notesOpen ? island.call_id : null;
   const fold = foldable && (
     <button
       className="island-icon"
@@ -59,26 +64,39 @@ export function Island() {
       { text: "Vertical", checked: orientation === "vertical", action: () => setOrientation("vertical") },
       "separator",
       { text: folded ? "Expandir" : "Achicar", enabled: foldable, action: () => setFolded(!folded) },
+      {
+        text: "Notas",
+        checked: notesOpen,
+        enabled: island.kind === "recording",
+        action: () => setNotesOpen(!notesOpen),
+      },
       { text: "Volver arriba al centro", action: () => void api.islandResetPlace() },
     ]);
   };
 
+  // One element whichever it shows: the window follows its size.
   return (
     <div
       ref={root}
-      className={`island ${orientation} ${foldable && folded ? "folded" : ""}`}
+      className={notes ? "island expanded" : `island ${orientation} ${foldable && folded ? "folded" : ""}`}
       data-kind={island.kind}
       onMouseDown={drag}
       onContextMenu={menu}
-      title={island.kind === "hidden" ? undefined : "Arrastrá para moverla · clic derecho: opciones"}
+      title={island.kind === "hidden" || notes ? undefined : "Arrastrá para moverla · clic derecho: opciones"}
     >
-      {render(island, foldable && folded, orientation)}
-      {fold}
+      {island.kind === "recording" && notes ? (
+        <NotesPanel callId={notes} startedAt={island.started_at_ms} onClose={() => setNotesOpen(false)} />
+      ) : (
+        <>
+          {render(island, foldable && folded, orientation, () => setNotesOpen(true))}
+          {fold}
+        </>
+      )}
     </div>
   );
 }
 
-function render(island: IslandState, folded: boolean, orientation: Orientation) {
+function render(island: IslandState, folded: boolean, orientation: Orientation, openNotes: () => void) {
   switch (island.kind) {
     case "hidden":
       return null;
@@ -107,6 +125,9 @@ function render(island: IslandState, folded: boolean, orientation: Orientation) 
               {island.app_name && <span className="island-label island-faint">{island.app_name}</span>}
               <Wave columns={orientation === "vertical" ? 24 : HISTORY} />
               <MarkButton />
+              <button className="island-button" onClick={openNotes} title="Tomar notas sobre la llamada">
+                notas
+              </button>
               <button className="island-button" onClick={() => api.stopRecording()}>
                 detener
               </button>
@@ -154,6 +175,82 @@ function render(island: IslandState, folded: boolean, orientation: Orientation) 
         </>
       );
   }
+}
+
+/** The island opened into a small panel: the notes of the call being recorded, the same ones
+ * as in the app. A screenshot pasted or dropped on it goes into them, with this moment. */
+function NotesPanel({ callId, startedAt, onClose }: { callId: CallId; startedAt: number; onClose: () => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const [dir, setDir] = useState<string | null>(null);
+  const [saved, setSaved] = useState<"saved" | "saving" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const editor = useRef<NoteEditorHandle>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getCall(callId).then((d) => !cancelled && setDir(d.dir), () => {});
+    const load = () => api.getNotes(callId).then((n) => !cancelled && setText(n.text), () => {});
+    load();
+    const unlisten = onNotesChanged((id) => id === callId && load());
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, [callId]);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 2500);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  // Files dropped anywhere on it: the floating thumbnail of a screenshot, images from the Finder.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type !== "drop") return;
+      const images = payload.paths.filter(isImagePath);
+      if (images.length > 0) void editor.current?.attachFiles(images).catch(() => {});
+    });
+    return () => void unlisten.then((fn) => fn());
+  }, []);
+
+  return (
+    <>
+      <div className="island-bar" title="Arrastrá para moverla · clic derecho: opciones">
+        <span className="island-mark live" />
+        <Elapsed since={startedAt} />
+        <span className="island-spacer" />
+        <MarkButton />
+        <button className="island-button" onClick={() => api.stopRecording()}>
+          detener
+        </button>
+        <button className="island-icon" onClick={onClose} aria-label="Cerrar las notas" title="Cerrar las notas">
+          <FoldGlyph />
+        </button>
+      </div>
+      <div className="island-notes">
+        {text != null && (
+          <NoteEditor
+            key={callId}
+            ref={editor}
+            callId={callId}
+            dir={dir}
+            initial={text}
+            onState={setSaved}
+            onError={(e) => setMessage(String(e))}
+            compact
+            placeholder="Lo que no querés olvidar…"
+            autoFocus
+            onEscape={onClose}
+          />
+        )}
+      </div>
+      <p className="island-notes-foot tech-label">
+        <span className="island-notes-message">{message ?? "⌘V pega una captura"}</span>
+        <span>{saved === "saving" ? "guardando…" : saved === "saved" ? "guardado" : ""}</span>
+      </p>
+    </>
+  );
 }
 
 /** Marks this moment of the call; it shows in the call's notes and transcript. */

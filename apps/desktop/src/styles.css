@@ -3344,6 +3344,53 @@ html.island-window body {
   text-align: right;
 }
 
+/* Opened into a panel to take notes over the call: the bar, then the page. */
+.island.expanded {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 380px;
+  height: auto;
+  padding: 0;
+}
+
+.island-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.island-spacer {
+  flex: 1;
+}
+
+.island-notes {
+  height: 176px;
+  overflow-y: auto;
+  white-space: normal;
+}
+
+.island-notes-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-notes-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  margin: 0;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 10px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before {

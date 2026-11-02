@@ -75,7 +75,7 @@ pub async fn summaries(state: State<'_, AppState>) -> CmdResult<HashMap<CallId, 
 }
 
 /// Event telling the windows a call's notes changed, with its id: a moment marked from the
-/// island shows up in the open call.
+/// island shows up in the open call, and what is typed in one window shows in the others.
 const NOTES_EVENT: &str = "notes_changed";
 
 #[tauri::command]
@@ -85,8 +85,9 @@ pub async fn get_notes(state: State<'_, AppState>, id: CallId) -> CmdResult<Note
 
 /// Saves the free text only, so typing never undoes a moment marked meanwhile.
 #[tauri::command]
-pub async fn save_notes_text(state: State<'_, AppState>, id: CallId, text: String) -> CmdResult<()> {
+pub async fn save_notes_text(app: AppHandle, state: State<'_, AppState>, id: CallId, text: String) -> CmdResult<()> {
     state.library.update_notes(&id, |notes| notes.text = text).map_err(to_string)?;
+    let _ = app.emit(NOTES_EVENT, &id);
     Ok(())
 }
 

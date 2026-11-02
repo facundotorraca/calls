@@ -1,9 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, type CallId, type Mark, type Notes } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { api, isImagePath, type CallId, type Mark, type Notes } from "./api";
 import { formatTimestamp } from "./format";
+import { NoteEditor, type NoteEditorHandle } from "./NoteEditor";
 
 interface Props {
   callId: CallId;
+  /** The call's folder, where the images of the notes are; `null` until known. */
+  dir: string | null;
   notes: Notes;
   /** The call is being recorded: a moment is marked now, live. */
   recording: boolean;
@@ -14,13 +18,24 @@ interface Props {
   onError: (error: unknown) => void;
 }
 
-/** How long typing has to stop before the text is saved. */
-const SAVE_AFTER_MS = 600;
-
-/** The user's own notes on a call: free text, saved as it is typed, and marked moments. */
-export function NotesView({ callId, notes, recording, position, onSeek, onMarks, onError }: Props) {
+/** The user's own notes on a call: free text with images in it, saved as it is typed, and
+ * marked moments. Images dropped on them go in where the caret was. */
+export function NotesView({ callId, dir, notes, recording, position, onSeek, onMarks, onError }: Props) {
   const [saved, setSaved] = useState<"saved" | "saving" | null>(null);
   const [focusMark, setFocusMark] = useState<number | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const editor = useRef<NoteEditorHandle>(null);
+
+  // `App` leaves image files dropped here to the notes instead of importing them.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type !== "drop" || !payload.paths.every(isImagePath)) return;
+      const scale = window.devicePixelRatio || 1;
+      const under = document.elementFromPoint(payload.position.x / scale, payload.position.y / scale);
+      if (under && root.current?.contains(under)) void editor.current?.attachFiles(payload.paths).catch(() => {});
+    });
+    return () => void unlisten.then((fn) => fn());
+  }, []);
 
   const mark = async () => {
     try {
@@ -38,11 +53,25 @@ export function NotesView({ callId, notes, recording, position, onSeek, onMarks,
     api.setMark(callId, at, text).then(onMarks, onError);
 
   return (
-    <div className="notes">
-      <NoteText key={callId} callId={callId} initial={notes.text} onState={setSaved} onError={onError} />
+    <div className="notes" ref={root} data-notes-call={callId}>
+      <NoteEditor
+        key={callId}
+        ref={editor}
+        callId={callId}
+        dir={dir}
+        initial={notes.text}
+        onState={setSaved}
+        onError={onError}
+        onSeek={recording ? undefined : onSeek}
+      />
       <p className="notes-foot tech-label">
-        <span>las notas guían el resumen</span>
-        <span>{saved === "saving" ? "guardando…" : saved === "saved" ? "guardado" : ""}</span>
+        <span>las notas guían el resumen · ⌘V pega imágenes</span>
+        <span className="notes-foot-end">
+          {saved === "saving" ? "guardando…" : saved === "saved" ? "guardado" : ""}
+          <button className="ghost-button" onClick={() => void editor.current?.pick().catch(() => {})}>
+            adjuntar imagen
+          </button>
+        </span>
       </p>
 
       <section className="marks">
@@ -94,69 +123,6 @@ function MarkHereLabel({ position }: { position: () => number }) {
     return () => clearInterval(timer);
   }, [position]);
   return <>marcar en {formatTimestamp(ms)}</>;
-}
-
-/** The free text. Saved a moment after typing stops, and on leaving the call. */
-function NoteText({
-  callId,
-  initial,
-  onState,
-  onError,
-}: {
-  callId: CallId;
-  initial: string;
-  onState: (state: "saved" | "saving" | null) => void;
-  onError: (error: unknown) => void;
-}) {
-  const [text, setText] = useState(initial);
-  const area = useRef<HTMLTextAreaElement>(null);
-  const pending = useRef<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  const flush = () => {
-    clearTimeout(timer.current);
-    const value = pending.current;
-    if (value == null) return;
-    pending.current = null;
-    api.saveNotesText(callId, value).then(
-      () => pending.current == null && onState("saved"),
-      (e) => {
-        onState(null);
-        onError(e);
-      },
-    );
-  };
-
-  // Leaving the call (or the tab) saves what is left. Mounted once per call.
-  const flushRef = useRef(flush);
-  flushRef.current = flush;
-  useEffect(() => () => flushRef.current(), []);
-
-  // As tall as its text: the page scrolls, not a box inside it.
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [text]);
-
-  return (
-    <textarea
-      ref={area}
-      className="notes-text"
-      value={text}
-      placeholder="Lo que no querés olvidar de esta llamada…"
-      spellCheck
-      onChange={(e) => {
-        setText(e.target.value);
-        pending.current = e.target.value;
-        onState("saving");
-        clearTimeout(timer.current);
-        timer.current = setTimeout(flush, SAVE_AFTER_MS);
-      }}
-      onBlur={flush}
-    />
-  );
 }
 
 function MarkRow({

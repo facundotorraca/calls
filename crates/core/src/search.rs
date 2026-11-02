@@ -119,7 +119,7 @@ fn passages(summary: &Option<Summary>, notes: &Notes, transcript: Option<&crate:
             hit(HitKind::Task, &text)
         }));
     }
-    out.extend(notes.text.split('\n').filter(|p| !p.trim().is_empty()).map(|p| hit(HitKind::Notes, p)));
+    out.extend(notes.prose().split('\n').filter(|p| !p.trim().is_empty()).map(|p| hit(HitKind::Notes, p)));
     out.extend(notes.marks.iter().map(|m| Hit { at_ms: Some(m.at_ms), ..hit(HitKind::Mark, &m.text) }));
     if let Some(transcript) = transcript {
         out.extend(transcript.segments.iter().map(|s| Hit {

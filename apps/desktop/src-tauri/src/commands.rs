@@ -90,6 +90,17 @@ pub async fn save_notes_text(state: State<'_, AppState>, id: CallId, text: Strin
     Ok(())
 }
 
+/// The call being recorded and how far into it we are, if it is `id` (or any, without `id`).
+fn recording_now(state: &AppState, id: Option<&CallId>) -> Option<(CallId, u64)> {
+    match state.recorder.island() {
+        Island::Recording { call_id, started_at_ms, .. } if id.is_none_or(|id| *id == call_id) => {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            Some((call_id, now.saturating_sub(started_at_ms)))
+        }
+        _ => None,
+    }
+}
+
 /// Marks a moment. Without `id` and `at_ms`, now in the call being recorded.
 #[tauri::command]
 pub async fn add_mark(
@@ -100,18 +111,57 @@ pub async fn add_mark(
 ) -> CmdResult<Notes> {
     let (id, at_ms) = match (id, at_ms) {
         (Some(id), Some(at_ms)) => (id, at_ms),
-        (id, None) => match state.recorder.island() {
-            Island::Recording { call_id, started_at_ms, .. } if id.as_ref().is_none_or(|id| *id == call_id) => {
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                (call_id, now.saturating_sub(started_at_ms))
-            }
-            _ => return Err("No se está grabando esta llamada".into()),
-        },
+        (id, None) => recording_now(&state, id.as_ref()).ok_or("No se está grabando esta llamada")?,
         (None, Some(_)) => return Err("Falta la llamada".into()),
     };
     let notes = state.library.add_mark(&id, at_ms).map_err(to_string)?;
     let _ = app.emit(NOTES_EVENT, &id);
     Ok(notes)
+}
+
+/// An image kept for a call's notes, for the UI to put in their text where it was added.
+#[derive(Serialize)]
+pub struct NoteImage {
+    /// Its file name in the call's `images` folder.
+    file: String,
+    /// When in the call it was added, if it is being recorded.
+    at_ms: Option<u64>,
+}
+
+/// Keeps a pasted image for a call's notes. The body is the image; the headers say the call
+/// (`call-id`) and its kind (`extension`, e.g. `png`).
+#[tauri::command]
+pub async fn attach_image(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> CmdResult<NoteImage> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Falta la imagen".into()) };
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let id = CallId(header("call-id").ok_or("Falta la llamada")?);
+    let extension = header("extension").unwrap_or_else(|| "png".into());
+    let file = state.library.add_image(&id, bytes, &extension).map_err(to_string)?;
+    Ok(NoteImage { file, at_ms: recording_now(&state, Some(&id)).map(|(_, at_ms)| at_ms) })
+}
+
+/// Keeps image files (dropped, or picked) for a call's notes.
+#[tauri::command]
+pub async fn attach_image_files(
+    state: State<'_, AppState>,
+    id: CallId,
+    paths: Vec<PathBuf>,
+) -> CmdResult<Vec<NoteImage>> {
+    let at_ms = recording_now(&state, Some(&id)).map(|(_, at_ms)| at_ms);
+    let mut images = Vec::new();
+    for path in paths {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = state.library.add_image(&id, &bytes, extension).map_err(to_string)?;
+        images.push(NoteImage { file, at_ms });
+    }
+    Ok(images)
+}
+
+/// Deletes an image taken out of a call's notes.
+#[tauri::command]
+pub async fn remove_image(state: State<'_, AppState>, id: CallId, file: String) -> CmdResult<()> {
+    state.library.remove_image(&id, &file).map_err(to_string)
 }
 
 /// Writes the line of the moment at `at_ms`, or removes the moment with `None`.

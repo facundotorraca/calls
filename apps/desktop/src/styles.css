@@ -1992,42 +1992,139 @@ code {
 
 /* ── Notes: the user's own words on a call ────────────────────────── */
 
-.notes-text {
-  display: block;
-  width: 100%;
+/* The notes read as one page: runs of text, borderless, with the images between them. */
+.note-editor {
   min-height: 132px;
   padding: 12px 14px;
-  overflow: hidden;
   border: 1px solid var(--border);
+  cursor: text;
+  transition: border-color 120ms linear;
+}
+
+.note-editor:hover {
+  border-color: var(--muted-foreground);
+}
+
+.note-editor:focus-within {
+  border-color: var(--foreground);
+}
+
+.note-editor-text {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
   outline: 0;
   background: transparent;
   color: var(--foreground);
   font: inherit;
   font-size: 15px;
   line-height: 1.65;
+  white-space: pre-wrap;
   resize: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.note-editor-text::placeholder {
+  color: var(--faint);
+}
+
+.note-image {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 10px 0;
+  cursor: default;
+}
+
+.note-image-thumb {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--card);
+  cursor: zoom-in;
   transition: border-color 120ms linear;
 }
 
-.notes-text:hover {
+.note-image-thumb:hover {
   border-color: var(--muted-foreground);
 }
 
-.notes-text:focus {
-  border-color: var(--foreground);
+.note-image-thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
 }
 
-.notes-text::placeholder {
-  color: var(--faint);
+.note-image-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.note-image-remove {
+  justify-content: center;
+  width: 24px;
+  padding: 0;
+  font-size: 15px;
+  opacity: 0;
+}
+
+.note-image:hover .note-image-remove,
+.note-image-remove:focus-visible {
+  opacity: 1;
+}
+
+/* In the island: smaller type, thumbnails, and the panel scrolls. */
+.note-editor.compact {
+  min-height: 100%;
+  padding: 10px 14px;
+  border: 0;
+}
+
+.note-editor.compact .note-editor-text {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.note-editor.compact .note-image {
+  margin: 6px 0;
+}
+
+.note-editor.compact .note-image-thumb {
+  cursor: default;
+}
+
+.note-editor.compact .note-image-thumb img {
+  max-height: 96px;
 }
 
 .notes-foot {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-top: 8px;
   color: var(--faint);
   font-size: 10px;
+}
+
+.notes-foot-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notes-foot .ghost-button {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
 }
 
 .marks {
@@ -2134,6 +2231,24 @@ code {
 .mark-row:hover .mark-remove,
 .mark-remove:focus-visible {
   opacity: 1;
+}
+
+.image-viewer {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: color-mix(in oklch, var(--background) 92%, transparent);
+  cursor: zoom-out;
+}
+
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  object-fit: contain;
 }
 
 /* In the transcript, a moment sits on the line it was marked at, a rule running out of it. */

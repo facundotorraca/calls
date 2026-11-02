@@ -54,12 +54,24 @@ export interface Summary {
   action_items: ActionItem[];
 }
 
-/** What the user wrote about a call (crates/core/src/notes.rs). */
+/** What the user wrote about a call (crates/core/src/notes.rs). The text is Markdown, with
+ * the images in it. */
 export interface Notes {
   text: string;
   /** In order of time. */
   marks: Mark[];
 }
+
+/** An image kept for the notes, a file in the call's `images/` folder, to put in their text. */
+export interface NoteImage {
+  file: string;
+  /** When in the call it was added, if it is being recorded. */
+  at_ms: number | null;
+}
+
+/** The kinds of image the notes take (IMAGE_EXTENSIONS in crates/core/src/notes.rs). */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
+export const isImagePath = (path: string) => IMAGE_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
 
 /** A moment worth coming back to, with an optional line about it. */
 export interface Mark {
@@ -218,6 +230,15 @@ export const api = {
   addMark: (id?: CallId, atMs?: number) => invoke<Notes>("add_mark", { id, atMs }),
   /** `null` text removes the moment. */
   setMark: (id: CallId, atMs: number, text: string | null) => invoke<Notes>("set_mark", { id, atMs, text }),
+  /** Keeps a pasted image, as its bytes, for the notes. While the call is recorded, it keeps the moment. */
+  attachImage: async (id: CallId, image: Blob) =>
+    invoke<NoteImage>("attach_image", new Uint8Array(await image.arrayBuffer()), {
+      headers: { "call-id": id, extension: image.type.split("/")[1] ?? "png" },
+    }),
+  /** Keeps image files, dropped or picked, for the notes. */
+  attachImageFiles: (id: CallId, paths: string[]) => invoke<NoteImage[]>("attach_image_files", { id, paths }),
+  /** Deletes an image taken out of the notes. */
+  removeImage: (id: CallId, file: string) => invoke<void>("remove_image", { id, file }),
   /** Calls with every word somewhere in them, title matches first. */
   search: (query: string) => invoke<SearchResult[]>("search", { query }),
   importFiles: (paths: string[]) => invoke<Call[]>("import_files", { paths }),

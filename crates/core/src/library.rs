@@ -8,7 +8,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::call::{CALL_FILE, TrackRole};
-use crate::notes::{Mark, Notes};
+use crate::notes::{IMAGE_EXTENSIONS, IMAGES_DIR, Mark, Notes};
 use crate::notion::{CallNotion, NotionPage};
 use crate::summary::{SUMMARY_MD, Summary};
 use crate::transcript::{TRANSCRIPT_JSON, TRANSCRIPT_MD};
@@ -418,6 +418,47 @@ impl Library {
         })
     }
 
+    /// Keeps an image for a call's notes: `bytes`, of the kind `extension` says (`png`). Returns
+    /// its file name inside [`IMAGES_DIR`]; the notes link it from their text.
+    pub fn add_image(&self, id: &CallId, bytes: &[u8], extension: &str) -> Result<String> {
+        let extension = extension.trim_start_matches('.').to_lowercase();
+        if !IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+            bail!("Las notas aceptan imágenes {}", IMAGE_EXTENSIONS.join(", "));
+        }
+        let images = self.dir(id).join(IMAGES_DIR);
+        fs::create_dir_all(&images)?;
+        // Named by when it was added; `create_new` so two at the same second never share a file.
+        let stamp = Local::now().format("%Y-%m-%d_%H%M%S");
+        let (mut file, mut n) = (format!("{stamp}.{extension}"), 2);
+        let mut out = loop {
+            match fs::OpenOptions::new().write(true).create_new(true).open(images.join(&file)) {
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    file = format!("{stamp}-{n}.{extension}");
+                    n += 1;
+                }
+                opened => break opened?,
+            }
+        };
+        if let Err(e) = std::io::Write::write_all(&mut out, bytes) {
+            let _ = fs::remove_file(images.join(&file));
+            return Err(e.into());
+        }
+        Ok(file)
+    }
+
+    /// Deletes an image taken out of a call's notes.
+    pub fn remove_image(&self, id: &CallId, file: &str) -> Result<()> {
+        // Only a plain file name: never a path out of the folder.
+        if Path::new(file).file_name() != Some(file.as_ref()) {
+            bail!("No es una imagen de las notas: {file}");
+        }
+        let path = self.dir(id).join(IMAGES_DIR).join(file);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
     /// The fingerprint of a speaker's voice in a call, if diarization took it.
     pub fn voice(&self, id: &CallId, speaker: &str) -> Option<Vec<f32>> {
         crate::voices::load(&self.dir(id)).remove(speaker)
@@ -500,6 +541,27 @@ mod tests {
         assert_ne!(a.id, b.id);
         assert!(a.id.0.ends_with("_kickoff-acme"));
         assert_eq!(library.list().unwrap().len(), 2);
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn images_go_in_the_call_folder() {
+        let tmp = std::env::temp_dir().join(format!("calls-test-images-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("a.mkv"), b"x").unwrap();
+        let call = library.import(&tmp.join("a.mkv")).unwrap();
+
+        let first = library.add_image(&call.id, b"one", "PNG").unwrap();
+        let second = library.add_image(&call.id, b"two", ".png").unwrap();
+        assert_ne!(first, second, "added in the same second, still two files");
+        let images = library.dir(&call.id).join(IMAGES_DIR);
+        assert_eq!(fs::read(images.join(&second)).unwrap(), b"two");
+        assert!(library.add_image(&call.id, b"x", "pdf").is_err());
+
+        assert!(library.remove_image(&call.id, "../call.json").is_err());
+        assert!(library.dir(&call.id).join(CALL_FILE).exists());
+        library.remove_image(&call.id, &first).unwrap();
+        assert!(!images.join(&first).exists() && images.join(&second).exists());
         fs::remove_dir_all(tmp).unwrap();
     }
 

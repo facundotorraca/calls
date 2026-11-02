@@ -65,7 +65,7 @@ export function CallView({
     };
   }, [call.id, call.status.state, edits]);
 
-  // The user's notes, reloaded when a moment is marked from the island.
+  // The user's notes, reloaded when they change from the island.
   const [notes, setNotes] = useState<{ id: string; notes: Notes } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +147,7 @@ export function CallView({
       content: (
         <NotesView
           callId={call.id}
+          dir={current?.dir ?? null}
           notes={callNotes}
           recording={state === "recording"}
           position={position}

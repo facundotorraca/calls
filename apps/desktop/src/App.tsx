@@ -10,6 +10,7 @@ import {
   onSelectCall,
   onSettingsChanged,
   onDownload,
+  isImagePath,
   me,
   MEDIA_EXTENSIONS,
   type Call,
@@ -21,6 +22,13 @@ import {
 } from "./api";
 
 const NO_NOTION: Settings["notion"] = { workspace: null, parent: null };
+
+/** The call whose notes are under a point of the window, given in physical pixels as file drops
+ * report it. */
+function notesAt(x: number, y: number): CallId | undefined {
+  const scale = window.devicePixelRatio || 1;
+  return document.elementFromPoint(x / scale, y / scale)?.closest<HTMLElement>("[data-notes-call]")?.dataset.notesCall;
+}
 import { CallList, SORT_LABELS, sortCalls, type ProgressMap, type Sort } from "./CallList";
 import { CallView } from "./CallView";
 import { Dashboard } from "./Dashboard";
@@ -39,7 +47,8 @@ export function App() {
   const [progress, setProgress] = useState<ProgressMap>({});
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [dragging, setDragging] = useState(false);
+  /** Files dragged over the window: to import, or images onto the open call's notes. */
+  const [dragging, setDragging] = useState<false | "import" | "notes">(false);
   const [error, setError] = useState<string | null>(null);
   const [island, setIsland] = useState<Island>({ kind: "hidden" });
   const [scope, setScope] = usePersistentState<Scope>("sidebar.scope", { kind: "all" });
@@ -155,12 +164,17 @@ export function App() {
     return () => void unlisten.then((fn) => fn());
   }, [refresh]);
 
-  // Drag & drop recordings anywhere on the window.
+  // Drag & drop recordings anywhere on the window, and images onto a call's notes.
   useEffect(() => {
+    let images = false;
     const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
-      if (payload.type === "enter" || payload.type === "over") setDragging(true);
-      else setDragging(false);
-      if (payload.type === "drop") importPaths(payload.paths);
+      if (payload.type === "leave") return setDragging(false);
+      if (payload.type !== "over") images = payload.paths.length > 0 && payload.paths.every(isImagePath);
+      const notes = images ? notesAt(payload.position.x, payload.position.y) : undefined;
+      if (payload.type !== "drop") return setDragging(notes ? "notes" : "import");
+      setDragging(false);
+      // Onto the notes, the notes take them where the caret was (`NotesView`).
+      if (!notes) importPaths(payload.paths);
     });
     return () => void unlisten.then((fn) => fn());
   }, [importPaths]);
@@ -424,7 +438,7 @@ export function App() {
 
       {dragging && (
         <div className="drop-overlay">
-          <p className="tech-label">soltá para transcribir</p>
+          <p className="tech-label">{dragging === "notes" ? "soltá para sumarlas a las notas" : "soltá para transcribir"}</p>
         </div>
       )}
 

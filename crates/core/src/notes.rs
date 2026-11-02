@@ -1,6 +1,10 @@
 //! What the person using the app wrote about a call: free notes, and moments marked while it
 //! was happening (or later, while listening). They are theirs: processing never touches them,
 //! and the summary reads them to know what mattered.
+//!
+//! The notes are Markdown, and images go in them where they were added, each on its own line:
+//! `![12:34](images/2026-11-02_153012.png)`, the alt being the moment of the call, if any. The
+//! files live in the call's [`IMAGES_DIR`], so `notes.md` next to it shows them.
 
 use std::fs;
 use std::path::Path;
@@ -12,6 +16,10 @@ use crate::transcript::format_timestamp;
 
 pub const NOTES_JSON: &str = "notes.json";
 pub const NOTES_MD: &str = "notes.md";
+/// Where the images of the notes are kept, inside the call's folder.
+pub const IMAGES_DIR: &str = "images";
+/// The kinds of image the notes take: what the app can show.
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Notes {
@@ -75,14 +83,21 @@ impl Notes {
         md
     }
 
-    /// For a model: the notes, then the marked moments, one per line. `None` if empty.
+    /// The words of the notes, without their images.
+    pub fn prose(&self) -> String {
+        self.text.lines().filter(|line| !is_image(line)).collect::<Vec<_>>().join("\n")
+    }
+
+    /// For a model: the notes (their words: it does not see images), then the marked moments,
+    /// one per line. `None` if there are none.
     pub fn to_prompt(&self) -> Option<String> {
-        if self.is_empty() {
+        let prose = self.prose();
+        if prose.trim().is_empty() && self.marks.is_empty() {
             return None;
         }
         let mut out = String::new();
-        if !self.text.trim().is_empty() {
-            out.push_str(self.text.trim());
+        if !prose.trim().is_empty() {
+            out.push_str(prose.trim());
             out.push('\n');
         }
         if !self.marks.is_empty() {
@@ -100,6 +115,12 @@ impl Notes {
             if m.text.trim().is_empty() { format!("[{at}]") } else { format!("[{at}] {}", m.text.trim()) }
         })
     }
+}
+
+/// Whether a line of the notes is an image of theirs.
+pub fn is_image(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("![") && line.ends_with(')') && line.contains(&format!("]({IMAGES_DIR}/"))
 }
 
 #[cfg(test)]
@@ -131,5 +152,15 @@ mod tests {
             Notes { text: " ojo con el plazo ".into(), marks: vec![Mark { at_ms: 65_000, text: String::new() }] };
         assert_eq!(notes.to_prompt().unwrap(), "ojo con el plazo\nMoments they marked as important:\n[01:05]\n");
         assert_eq!(Notes::default().to_prompt(), None);
+    }
+
+    #[test]
+    fn the_summary_reads_the_words_not_the_images() {
+        let text = "antes\n![01:05](images/a.png)\ndespués".to_string();
+        let notes = Notes { text, marks: vec![] };
+        assert_eq!(notes.to_prompt().unwrap(), "antes\ndespués\n");
+        let only_images = Notes { text: "![](images/a.png)".into(), marks: vec![] };
+        assert!(!only_images.is_empty(), "saving them must not delete the notes");
+        assert_eq!(only_images.to_prompt(), None);
     }
 }

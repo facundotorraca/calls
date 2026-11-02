@@ -20,6 +20,19 @@ func property<T: BitwiseCopyable>(_ object: AudioObjectID, _ selector: AudioObje
     return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : nil
 }
 
+/// Calls `changed` on `queue` whenever the property changes, until the returned function is called.
+func listen(
+    _ object: AudioObjectID,
+    _ selector: AudioObjectPropertySelector,
+    queue: DispatchQueue,
+    _ changed: @escaping () -> Void
+) -> () -> Void {
+    var address = address(selector)
+    let block: AudioObjectPropertyListenerBlock = { _, _ in changed() }
+    guard AudioObjectAddPropertyListenerBlock(object, &address, queue, block) == noErr else { return {} }
+    return { AudioObjectRemovePropertyListenerBlock(object, &address, queue, block) }
+}
+
 func stringProperty(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
     var address = address(selector)
     var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)

@@ -81,6 +81,7 @@ function CallItem({
   onContextMenu,
 }: Props & { call: Call }) {
   const classes = ["call-item", call.id === selected && "selected", call.id === dragging && "dragging"];
+  const duration = formatDuration(call.duration_ms);
   return (
     <li>
       <button
@@ -94,15 +95,17 @@ function CallItem({
       >
         <span className="call-title">{call.title}</span>
         <span className="call-meta">
-          {formatDate(call.created_at)}
-          {call.duration_ms != null && ` · ${formatDuration(call.duration_ms)}`}
-        </span>
-        {showFolder && call.folder && (
-          <span className="call-folder">
-            <FolderMark color={folderColor(folders, call.folder)} />
-            {call.folder}
+          <span className="call-when">
+            {formatDate(call.created_at)}
+            {duration && ` · ${duration}`}
           </span>
-        )}
+          {showFolder && call.folder && (
+            <span className="call-folder" title={call.folder}>
+              <FolderMark color={folderColor(folders, call.folder)} />
+              <span className="call-folder-name">{call.folder}</span>
+            </span>
+          )}
+        </span>
         <CallStatus call={call} progress={progress[call.id]} />
       </button>
     </li>

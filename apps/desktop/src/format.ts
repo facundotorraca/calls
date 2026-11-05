@@ -1,14 +1,19 @@
 import { STEP_LABELS } from "./api";
 
-const dateFormat = new Intl.DateTimeFormat("es-AR", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+const dayFormat = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short" });
+const timeFormat = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
-export const formatDate = (iso: string) => dateFormat.format(new Date(iso));
+/** `3 nov`, with the year only when it is not this one. */
+export function formatDay(iso: string): string {
+  const date = new Date(iso);
+  // From the parts: some locale data writes `3 de nov`.
+  const part = (type: string) => dayFormat.formatToParts(date).find((p) => p.type === type)?.value;
+  const day = `${part("day")} ${part("month")}`;
+  return date.getFullYear() === new Date().getFullYear() ? day : `${day} ${date.getFullYear()}`;
+}
+
+/** `3 nov · 08:21` */
+export const formatDate = (iso: string) => `${formatDay(iso)} · ${timeFormat.format(new Date(iso))}`;
 
 export function formatDuration(ms: number | null): string | null {
   if (ms == null) return null;

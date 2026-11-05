@@ -30,11 +30,11 @@ jobs:
       - name: Frontend
         run: pnpm install --frozen-lockfile && pnpm build
         working-directory: apps/desktop
-      # tauri-build only checks the sidecars exist; building the real ones (whisper.cpp, Swift)
+      # tauri-build only checks the sidecars exist; building the real ones (whisper.cpp, ffmpeg, Swift)
       # is run-release's job, and would triple this one.
       - name: Sidecar stand-ins
         run: |
           mkdir -p apps/desktop/src-tauri/binaries
-          for bin in whisper-cli calls-audio; do touch "apps/desktop/src-tauri/binaries/$bin-aarch64-apple-darwin"; done
+          for bin in whisper-cli calls-audio ffmpeg ffprobe uv; do touch "apps/desktop/src-tauri/binaries/$bin-aarch64-apple-darwin"; done
 
       - run: make check

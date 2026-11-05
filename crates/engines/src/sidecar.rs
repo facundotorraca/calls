@@ -19,7 +19,13 @@ pub fn locate(name: &str) -> Option<PathBuf> {
     dirs.extend(env::var_os("PATH").map(|p| env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
 
     let suffixed = format!("{name}-{}", target_triple());
-    dirs.iter().flat_map(|dir| [dir.join(name), dir.join(&suffixed)]).find(|path| path.is_file())
+    dirs.iter().flat_map(|dir| [dir.join(name), dir.join(&suffixed)]).find(|path| is_executable(path))
+}
+
+/// Not just any file: CI stands in empty ones for the sidecars it does not build.
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// Tauri names sidecars `<name>-<target triple>` in the source tree.

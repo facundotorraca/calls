@@ -25,7 +25,7 @@ pub struct PythonWorker {
 
 impl PythonWorker {
     pub fn locate(name: &str) -> Result<PythonWorker> {
-        let uv = sidecar::locate("uv").context("uv not found (brew install uv)")?;
+        let uv = sidecar::locate("uv").context("uv not found (run scripts/build-sidecars.sh)")?;
         let project = workers_dir()
             .map(|dir| dir.join(name))
             .filter(|dir| dir.join("main.py").is_file())

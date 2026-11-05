@@ -7,7 +7,7 @@ deps:
 	git submodule update --init
 	cd apps/desktop && pnpm install
 
-## Builds whisper-cli from vendor/whisper.cpp (needs cmake).
+## Builds whisper-cli (needs cmake), calls-audio and ffmpeg, and fetches uv.
 sidecars:
 	./scripts/build-sidecars.sh
 

@@ -16,8 +16,8 @@ pub struct Ffmpeg {
 impl Ffmpeg {
     pub fn locate() -> Result<Ffmpeg> {
         Ok(Ffmpeg {
-            ffmpeg: sidecar::locate("ffmpeg").context("ffmpeg not found (brew install ffmpeg)")?,
-            ffprobe: sidecar::locate("ffprobe").context("ffprobe not found (brew install ffmpeg)")?,
+            ffmpeg: sidecar::locate("ffmpeg").context("ffmpeg not found (run scripts/build-sidecars.sh)")?,
+            ffprobe: sidecar::locate("ffprobe").context("ffprobe not found (run scripts/build-sidecars.sh)")?,
         })
     }
 

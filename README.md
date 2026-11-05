@@ -7,15 +7,19 @@ You can also drop any existing recording on the app. Everything runs on your mac
 ## Install
 
 Requires macOS 15+ on Apple Silicon. Download [ftor-calls.dmg](https://apps.ftor.dev/calls/ftor-calls.dmg)
-(also on ftor's home page), open it and drag ftor-calls to Applications. Then `brew install ffmpeg uv`, download the models from Settings, and for
-summaries install [Ollama](https://ollama.com) with a model (`ollama pull qwen3.5:35b`), or turn
-them off. Updates install themselves: the menu bar icon offers to restart into a new version
-(never during a recording). Calls, settings and models live in
-`~/Library/Application Support/calls`.
+(also on ftor's home page), open it and drag ftor-calls to Applications. The app asks for the
+one thing it needs, the transcription model, with a button. That is all: ffmpeg comes inside it.
+
+Voices and summaries are optional and start off, for computers that cannot take them: turn them
+on in Settings > Pipeline, and each asks for what it needs then (a free Hugging Face account for
+voices, [Ollama](https://ollama.com) for summaries).
+
+Updates install themselves: the menu bar icon offers to restart into a new version (never during
+a recording). Calls, settings and models live in `~/Library/Application Support/calls`.
 
 ## Development
 
-Needs Xcode (for Swift), Rust, pnpm and `brew install cmake ffmpeg uv`.
+Needs Xcode (for Swift), Rust, pnpm and `brew install cmake`.
 
 ```sh
 make setup     # JS deps + builds the sidecars + downloads models (~1.6 GB)
@@ -41,7 +45,7 @@ Everything around a release (the bucket, the Infisical secrets it reads over OID
 certificate and the updater key) lives in ftor: `ops/terraform/apps.tf` and its ADR 0010.
 
 `make build` produces `ftor-calls.app` / `.dmg` in `target/release/bundle/`. `make icon` redraws the
-icon from `scripts/make-icon.py`.
+icon from `scripts/make-icon.py` (needs uv on the `$PATH`).
 `cargo run -p calls-cli -- doctor` checks what is installed.
 
 ## Architecture
@@ -57,7 +61,7 @@ crates/
 sidecars/calls-audio/  Swift: call detection and recording with Apple's audio APIs
 workers/               Python sidecars (see workers/README.md)
 vendor/whisper.cpp/    pinned submodule, built into the whisper-cli sidecar
-scripts/               build sidecars, download models
+scripts/               build sidecars (whisper-cli, calls-audio, ffmpeg, uv), download models
 ```
 
 Dependencies point inwards: `desktop`/`cli` -> `engines` -> `core`. The core never knows
@@ -67,6 +71,10 @@ which tool does the work, only the traits it needs (`AudioExtractor`, `Transcrib
 `whisper-cli`, `ffmpeg`) through their CLI, LLMs over HTTP (Ollama) and Python-only models as
 workers (`PythonWorker`, JSON over stdio, environments managed by uv), instead of linking
 third-party bindings. Swapping an engine means writing another adapter in `engines`.
+
+**The binaries come inside the app.** `scripts/build-sidecars.sh` builds ffmpeg from the official
+release (static, LGPL, only the formats the app imports, ~3 MB) and fetches the official uv, each
+pinned by version and checksum.
 
 ### Recording
 

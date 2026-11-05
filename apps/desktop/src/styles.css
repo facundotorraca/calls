@@ -1184,7 +1184,7 @@ code {
 }
 
 .call-title-row {
-  padding: 16px 0 18px;
+  padding: 12px 0;
 }
 
 /* The folder as a chip: hairline box, and the folder's tint when it has one. */
@@ -1223,9 +1223,9 @@ code {
 .readouts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 40px;
+  gap: 8px 32px;
   margin: 0;
-  padding-bottom: 22px;
+  padding-bottom: 16px;
 }
 
 .readout dt {
@@ -1252,9 +1252,9 @@ code {
   margin: 0 0 0 -6px;
   padding: 2px 6px;
   font-family: var(--font-dot);
-  font-size: 30px;
+  font-size: 20px;
   font-weight: 900;
-  line-height: 1.15;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -1267,9 +1267,9 @@ code {
 }
 
 .edit-hint {
-  width: 14px;
-  height: 14px;
-  margin-left: 10px;
+  width: 12px;
+  height: 12px;
+  margin-left: 8px;
   color: var(--muted-foreground);
   vertical-align: middle;
   opacity: 0;

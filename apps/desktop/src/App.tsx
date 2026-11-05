@@ -164,6 +164,13 @@ export function App() {
     return () => void unlisten.then((fn) => fn());
   }, [refresh]);
 
+  // Coming back to the app may have changed what is there (Ollama opened, say).
+  useEffect(() => {
+    const check = () => void api.doctor().then(setDoctor);
+    window.addEventListener("focus", check);
+    return () => window.removeEventListener("focus", check);
+  }, []);
+
   // Drag & drop recordings anywhere on the window, and images onto a call's notes.
   useEffect(() => {
     let images = false;
@@ -375,7 +382,8 @@ export function App() {
         {current ? (
           <CallView
             call={current}
-            canDiarize={doctor?.diarization ?? false}
+            doctor={doctor}
+            settings={settings}
             me={settings ? me(settings) : "Yo"}
             notion={settings?.notion ?? NO_NOTION}
             progress={progress[current.id]}

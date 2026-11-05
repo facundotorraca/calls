@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, onNotesChanged, type Call, type CallDetail, type Folder, type Notes, type Segment, type Settings } from "./api";
+import {
+  api,
+  onNotesChanged,
+  type Call,
+  type CallDetail,
+  type Doctor,
+  type Folder,
+  type Notes,
+  type Segment,
+  type Settings,
+} from "./api";
 import type { ProgressMap } from "./CallList";
 import { formatDuration, stepLabel } from "./format";
 import { NotesView } from "./NotesView";
 import { NotionControl } from "./Notion";
+import { PipelineStrip } from "./Pipeline";
 import type { Focus } from "./Search";
 import { folderColor, FolderMark } from "./Folders";
 import { ChevronIcon, FinderIcon, PencilIcon } from "./icons";
@@ -16,8 +27,9 @@ import { popupMenu, usePersistentState } from "./ui";
 
 interface Props {
   call: Call;
-  /** Diarization is on and its model downloaded: offer it for calls processed without it. */
-  canDiarize: boolean;
+  /** What is installed, and what is on: the pipeline's stages show one against the other. */
+  doctor: Doctor | null;
+  settings: Settings | null;
   /** The speaker label of the person using the app. */
   me: string;
   notion: Settings["notion"];
@@ -39,7 +51,8 @@ interface Props {
 
 export function CallView({
   call,
-  canDiarize,
+  doctor,
+  settings,
   me,
   notion,
   progress,
@@ -112,10 +125,11 @@ export function CallView({
       ),
     [call.id, onError],
   );
-  const diarizable = canDiarize && state === "ready" && !("diarize" in call.completed_steps);
 
   const tabs: Tab[] = [];
-  if (transcript && (summary || summarizing || state === "ready")) {
+  // Without the summary on, no tab for what would always be empty.
+  const offerSummary = state === "ready" && settings?.summarize && transcript && transcript.segments.length > 0;
+  if (transcript && (summary || summarizing || offerSummary)) {
     tabs.push({
       id: "summary",
       label: "resumen",
@@ -127,6 +141,13 @@ export function CallView({
         <div className="tab-placeholder">
           <span className="spinner" />
           Resumiendo la llamada…
+        </div>
+      ) : doctor?.llm_error ? (
+        <div className="tab-placeholder">
+          Para resumir hace falta Ollama con su modelo.
+          <button className="button" onClick={() => api.openSettings("pipeline")}>
+            ajustes
+          </button>
         </div>
       ) : (
         <div className="tab-placeholder">
@@ -167,16 +188,7 @@ export function CallView({
       meta: [last && formatDuration(last.end_ms), people > 1 && plural(people, "hablante", "hablantes")]
         .filter(Boolean)
         .join(" · "),
-      actions: (
-        <>
-          {diarizable && (
-            <button className="ghost-button tech-label" onClick={() => api.processCall(call.id).then(onChanged)}>
-              separar hablantes
-            </button>
-          )}
-          <CopyButton text={() => transcriptText(transcript)} />
-        </>
-      ),
+      actions: <CopyButton text={() => transcriptText(transcript)} />,
       content: (
         <TranscriptView
           transcript={transcript}
@@ -191,6 +203,10 @@ export function CallView({
     });
   }
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0];
+
+  // What went wrong: the step that stopped the call, and the ones it went on without.
+  const failures = Object.entries(call.step_errors ?? {});
+  if (call.status.state === "failed") failures.unshift([call.status.step, call.status.error]);
 
   // From a search: open its tab, then, once the passage is on the page, bring it into view.
   const pendingFocus = useRef<Focus | null>(null);
@@ -288,22 +304,33 @@ export function CallView({
         </dl>
       </header>
 
+      {state !== "recording" && doctor && settings && (
+        <PipelineStrip
+          call={call}
+          settings={settings}
+          doctor={doctor}
+          progress={progress}
+          onChanged={onChanged}
+          onError={onError}
+        />
+      )}
+
       {activeTab && <TabRail tabs={tabs} active={activeTab} onSelect={setTabId} />}
 
       <div className="call-body">
-        {call.status.state === "failed" && (
-          <div className="banner error">
+        {failures.map(([step, error]) => (
+          <div className="banner error" key={step}>
             <div className="banner-rail tech-label">
-              <span>falló: {stepLabel(call.status.step)}</span>
+              <span>falló: {stepLabel(step)}</span>
             </div>
             <div className="banner-body">
-              <pre>{call.status.error}</pre>
-              <button className="button" onClick={() => api.processCall(call.id)}>
+              <pre>{error}</pre>
+              <button className="button" onClick={() => api.processCall(call.id).then(onChanged).catch(onError)}>
                 reintentar
               </button>
             </div>
           </div>
-        )}
+        ))}
 
         {state === "recording" && (
           <div className="processing">
@@ -312,18 +339,6 @@ export function CallView({
               grabando
             </p>
             <p>La transcripción empieza al terminar la llamada.</p>
-          </div>
-        )}
-
-        {(state === "pending" || state === "processing") && !summarizing && (
-          <div className="processing">
-            <p className="processing-label tech-label">
-              <span>{call.status.state === "processing" ? stepLabel(call.status.step) : "en cola"}</span>
-              {progress && progress.fraction > 0 && <span>{Math.round(progress.fraction * 100)}%</span>}
-            </p>
-            <div className="bar large">
-              <span style={{ width: `${(progress?.fraction ?? 0) * 100}%` }} />
-            </div>
           </div>
         )}
 

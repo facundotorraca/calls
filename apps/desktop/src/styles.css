@@ -358,10 +358,6 @@ code {
   transition: width 300ms var(--ease-out-expo);
 }
 
-.bar.large {
-  height: 4px;
-}
-
 /* ── Shell ──────────────────────────────────────────────────────────── */
 
 .app {
@@ -808,7 +804,8 @@ code {
 
 /* Bands run edge to edge; what is inside them keeps to one column. */
 .call-header,
-.call-body {
+.call-body,
+.pipeline {
   padding-inline: max(24px, (100% - var(--content-width)) / 2);
 }
 
@@ -848,6 +845,160 @@ code {
   height: 14px;
   margin-inline: -8px;
   background: var(--border);
+}
+
+/* ── Pipeline ── */
+
+/* What happens to a call, as a line of squares: a square per stage, a rule to the next. The
+   colour of each says its state, in the palette every call state uses; an off stage is hollow,
+   with a broken rule. */
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 16px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pipeline-track {
+  display: flex;
+  flex: 1 1 400px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage {
+  --tint: var(--faint);
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.stage[data-state="done"] {
+  --tint: var(--settled);
+}
+
+.stage[data-state="running"] {
+  --tint: var(--working);
+}
+
+.stage[data-state="setup"] {
+  --tint: var(--pending);
+}
+
+.stage[data-state="failed"] {
+  --tint: var(--destructive);
+}
+
+.stage-button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.stage-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 8px;
+  margin-bottom: 8px;
+}
+
+.stage-mark {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border: 1px solid var(--tint);
+  transition: outline-color 120ms linear;
+}
+
+.stage[data-state="done"] .stage-mark,
+.stage[data-state="running"] .stage-mark,
+.stage[data-state="failed"] .stage-mark {
+  background: var(--tint);
+}
+
+.stage[data-state="running"] .stage-mark {
+  animation: signal-pulse 2.4s ease-out infinite;
+}
+
+.stage-link {
+  position: relative;
+  flex: 1;
+  height: 1px;
+  margin-right: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.stage[data-state="done"] .stage-link {
+  background: color-mix(in oklch, var(--settled) 45%, transparent);
+}
+
+.stage[data-state="off"] .stage-link {
+  background: repeating-linear-gradient(90deg, var(--border) 0 3px, transparent 3px 7px);
+}
+
+.stage-link > span {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--working);
+  transition: width 200ms linear;
+}
+
+.stage:last-child .stage-link {
+  visibility: hidden;
+}
+
+.stage-label {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 120ms linear;
+}
+
+.stage[data-state="running"] .stage-label,
+.stage[data-state="done"] .stage-label {
+  color: var(--foreground);
+}
+
+.stage-note {
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage[data-state="setup"] .stage-note,
+.stage[data-state="failed"] .stage-note,
+.stage[data-state="running"] .stage-note {
+  color: var(--tint);
+}
+
+.stage-button:not(:disabled):hover .stage-label {
+  color: var(--foreground);
+}
+
+.stage-button:not(:disabled):hover .stage-mark {
+  outline: 1px solid var(--foreground);
+  outline-offset: 1px;
+}
+
+.pipeline-again {
+  margin-right: -8px;
 }
 
 /* ── Notion ── */
@@ -3516,6 +3667,7 @@ html.island-window body {
   }
 
   .signal-square,
+  .stage[data-state="running"] .stage-mark,
   .island-mark.live,
   .spinner,
   .island-spinner,

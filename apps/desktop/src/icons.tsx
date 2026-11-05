@@ -26,6 +26,12 @@ export const ChevronIcon = (p: Props) => (
   </Icon>
 );
 
+export const RepeatIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M13 8a5 5 0 1 1-1.5-3.5L13 6M13 3v3h-3" />
+  </Icon>
+);
+
 export const FolderIcon = (p: Props) => (
   <Icon {...p}>
     <path d="M2 4.5c0-.6.4-1 1-1h3l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" />

@@ -28,6 +28,8 @@ export interface Call {
   tracks: Track[];
   status: Status;
   completed_steps: Record<string, string>;
+  /** Why an optional step failed, by step: the call is ready without it. */
+  step_errors?: Record<string, string>;
 }
 
 export interface Segment {
@@ -215,6 +217,7 @@ export type PipelineEvent =
   | { kind: "step_progress"; call_id: CallId; step: string; fraction: number }
   | { kind: "step_postponed"; call_id: CallId; step: string }
   | { kind: "step_finished"; call_id: CallId; step: string }
+  | { kind: "step_failed"; call_id: CallId; step: string; error: string }
   | { kind: "finished"; call_id: CallId }
   | { kind: "failed"; call_id: CallId; step: string; error: string };
 
@@ -305,10 +308,10 @@ export type Island =
       call_id: CallId;
       step: string;
       fraction: number;
-      /** Some step was left for later (the summary, when there was no memory for it). */
-      postponed: boolean;
+      /** The last step the call goes on without, left for later or failed. */
+      left_out: string | null;
     }
-  | { kind: "done"; call_id: CallId; title: string; failed: boolean; postponed: boolean };
+  | { kind: "done"; call_id: CallId; title: string; failed: boolean; left_out: string | null };
 
 export interface Levels {
   mic: number;

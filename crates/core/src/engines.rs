@@ -40,6 +40,11 @@ pub struct TranscribeRequest<'a> {
 }
 
 pub trait Transcriber: Send + Sync {
+    /// What is missing to transcribe (the model, say), if anything.
+    fn unavailable(&self) -> Option<&'static str> {
+        None
+    }
+
     fn transcribe(&self, request: &TranscribeRequest, progress: Progress) -> Result<Transcript>;
 }
 

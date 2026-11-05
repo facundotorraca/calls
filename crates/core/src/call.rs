@@ -92,6 +92,10 @@ pub struct Call {
     /// processing resumable and lets new steps run over old calls.
     #[serde(default)]
     pub completed_steps: BTreeMap<String, DateTime<Local>>,
+    /// Why an optional step failed, by step id: the call is ready without it. Goes away when
+    /// the step runs again.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub step_errors: BTreeMap<String, String>,
 }
 
 impl Call {

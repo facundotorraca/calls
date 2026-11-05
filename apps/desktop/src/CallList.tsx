@@ -112,7 +112,8 @@ function CallItem({
 function CallStatus({ call, progress }: { call: Call; progress?: ProgressMap[CallId] }) {
   switch (call.status.state) {
     case "ready":
-      return null;
+      // Nothing wrong: it was recorded on a computer without the model yet.
+      return "transcribe" in call.completed_steps ? null : <span className="badge pending">sin transcribir</span>;
     case "failed":
       return <span className="badge error">error</span>;
     case "recording":

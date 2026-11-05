@@ -293,6 +293,7 @@ impl Library {
             tracks: Vec::new(),
             status: Status::Pending,
             completed_steps: BTreeMap::new(),
+            step_errors: BTreeMap::new(),
         };
         self.save(&call)?;
         Ok(call)
@@ -320,6 +321,7 @@ impl Library {
             ],
             status: Status::Recording,
             completed_steps: BTreeMap::new(),
+            step_errors: BTreeMap::new(),
         };
         self.save(&call)?;
         Ok(call)

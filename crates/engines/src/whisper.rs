@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use calls_core::engines::{Progress, TranscribeRequest, Transcriber};
 use calls_core::{Segment, Transcript};
 use serde::Deserialize;
@@ -12,28 +12,36 @@ use crate::sidecar;
 
 /// Transcribes with whisper.cpp's own `whisper-cli`, built from `vendor/whisper.cpp`.
 pub struct WhisperCli {
-    bin: PathBuf,
+    bin: Option<PathBuf>,
     model: PathBuf,
     vad_model: Option<PathBuf>,
 }
 
 impl WhisperCli {
-    pub fn locate(model: PathBuf, vad_model: Option<PathBuf>) -> Result<WhisperCli> {
-        let bin = sidecar::locate("whisper-cli").context("whisper-cli not found (run scripts/build-sidecars.sh)")?;
-        if !model.is_file() {
-            bail!("whisper model not found at {} (run scripts/download-models.sh)", model.display());
-        }
-        Ok(WhisperCli { bin, model, vad_model: vad_model.filter(|p| p.is_file()) })
+    pub fn new(model: PathBuf, vad_model: Option<PathBuf>) -> WhisperCli {
+        WhisperCli { bin: sidecar::locate("whisper-cli"), model, vad_model: vad_model.filter(|p| p.is_file()) }
+    }
+
+    pub fn skips_silences(&self) -> bool {
+        self.vad_model.is_some()
     }
 }
 
 impl Transcriber for WhisperCli {
+    fn unavailable(&self) -> Option<&'static str> {
+        if self.bin.is_none() {
+            return Some("whisper-cli not found (run scripts/build-sidecars.sh)");
+        }
+        (!self.model.is_file()).then_some("the transcription model is not downloaded")
+    }
+
     fn transcribe(&self, request: &TranscribeRequest, progress: Progress) -> Result<Transcript> {
+        let bin = self.bin.as_ref().context("whisper-cli not found (run scripts/build-sidecars.sh)")?;
         // whisper-cli appends `.json` to the output prefix.
         let prefix = request.audio.with_extension("whisper");
         let json_path = prefix.with_extension("whisper.json");
 
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = Command::new(bin);
         cmd.arg("--model")
             .arg(&self.model)
             .arg("--file")

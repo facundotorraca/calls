@@ -96,6 +96,14 @@ export function Island() {
   );
 }
 
+/** What a call that went on without a step is missing. */
+const LEFT_OUT: Record<string, string> = {
+  transcribe: "sin transcribir",
+  diarize: "sin voces",
+  name_speakers: "sin nombres",
+  summarize: "sin resumen",
+};
+
 function render(island: IslandState, folded: boolean, orientation: Orientation, openNotes: () => void) {
   switch (island.kind) {
     case "hidden":
@@ -154,10 +162,10 @@ function render(island: IslandState, folded: boolean, orientation: Orientation, 
           <span className={`island-mark ${island.failed ? "failed" : "ok"}`} />
           <span
             className="island-label"
-            title={island.postponed ? "No había memoria libre para el resumen: generalo desde la llamada" : undefined}
+            title={island.left_out ? "Quedó pendiente: podés correrlo desde la llamada" : undefined}
           >
             {island.failed ? "no se pudo procesar" : "lista"}
-            {island.postponed && <span className="island-faint"> · sin resumen</span>}
+            {island.left_out && <span className="island-faint"> · {LEFT_OUT[island.left_out] ?? "incompleta"}</span>}
             {island.title && <span className="island-title">{island.title}</span>}
           </span>
           <button

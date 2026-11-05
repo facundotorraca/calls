@@ -229,7 +229,7 @@ fn spawn_queue(app: AppHandle, library: Library, settings: SharedSettings) -> Qu
     })
 }
 
-/// Errors raised before any step ran (e.g. whisper-cli missing) are not recorded by the
+/// Errors raised before any step ran (e.g. ffmpeg missing) are not recorded by the
 /// pipeline itself; record them so the call does not stay pending forever.
 fn mark_failed_if_unhandled(library: &Library, id: &CallId, error: &anyhow::Error, emit: &dyn Fn(Event)) {
     let Ok(call) = library.load(id) else { return };

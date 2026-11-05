@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use chrono::Local;
 
 use crate::call::TrackRole;
 use std::collections::{BTreeMap, HashMap};
@@ -16,13 +17,17 @@ use crate::notes::Notes;
 use crate::pipeline::Postponed;
 use crate::summary::{SUMMARY_JSON, SUMMARY_MD, Summary};
 use crate::transcript::{self, TRANSCRIPT_JSON, TRANSCRIPT_MD};
-use crate::voices::{self, MyVoice, Voices};
+use crate::voices::{self, MyVoice, VOICES_FILE, Voices};
 use crate::{Call, Step, StepContext, Track, Transcript};
 
 const AUDIO_FILE: &str = "audio.wav";
 
 /// What the player plays: the whole call in one file.
 pub const PLAYBACK_FILE: &str = "playback.m4a";
+
+/// In `Call::completed_steps`, that the silences were skipped when transcribing. Not a step
+/// of its own: whisper does both at once.
+pub const SILENCES: &str = "silences";
 
 /// Turns the call's audio (an imported file in any audio/video format, or the recorded
 /// tracks) into the 16 kHz WAV files the transcriber reads.
@@ -83,6 +88,8 @@ pub struct Transcribe {
     pub transcriber: Box<dyn Transcriber>,
     pub language: String,
     pub prompt: Option<String>,
+    /// The transcriber skips what has no voice in it.
+    pub skips_silences: bool,
 }
 
 impl Step for Transcribe {
@@ -91,6 +98,9 @@ impl Step for Transcribe {
     }
 
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
+        if let Some(missing) = self.transcriber.unavailable() {
+            return Err(Postponed(missing).into());
+        }
         if call.tracks.is_empty() {
             bail!("the call has no audio to transcribe");
         }
@@ -127,8 +137,19 @@ impl Step for Transcribe {
 
         let transcript = Transcript::merge(parts.into_iter().map(|(_, t)| t).collect());
         fs::write(ctx.dir.join(TRANSCRIPT_JSON), serde_json::to_vec_pretty(&transcript)?)?;
+        // Run again, the voices of the last transcript no longer have lines to go with.
+        let _ = fs::remove_file(ctx.dir.join(VOICES_FILE));
+        call.completed_steps.remove(SILENCES);
+        if self.skips_silences {
+            call.completed_steps.insert(SILENCES.into(), Local::now());
+        }
         Ok(())
     }
+}
+
+/// For the steps that work on the transcript, which is not there until it is transcribed.
+fn has_transcript(dir: &Path) -> bool {
+    dir.join(TRANSCRIPT_JSON).exists()
 }
 
 /// Tells the voices in the call apart. An imported recording is one mix of everyone; a
@@ -149,6 +170,14 @@ pub const SPEAKER_PREFIX: &str = "Hablante";
 impl Step for Diarize {
     fn id(&self) -> &'static str {
         "diarize"
+    }
+
+    fn optional(&self) -> bool {
+        true
+    }
+
+    fn ready(&self, _: &Call, dir: &Path) -> bool {
+        has_transcript(dir)
     }
 
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
@@ -290,6 +319,15 @@ impl Step for NameSpeakers {
         "name_speakers"
     }
 
+    fn optional(&self) -> bool {
+        true
+    }
+
+    /// Names go on the voices `Diarize` numbers: run before it, there would be none to name.
+    fn ready(&self, call: &Call, _: &Path) -> bool {
+        call.completed_steps.contains_key("diarize")
+    }
+
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
         let mut transcript = load_transcript(ctx.dir)?;
         let unnamed: Vec<String> =
@@ -395,6 +433,11 @@ impl Step for MixPlayback {
         "playback"
     }
 
+    /// The player makes it on the spot if it is not there.
+    fn optional(&self) -> bool {
+        true
+    }
+
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
         make_playback(call, ctx.dir, self.mixer.as_ref(), &|f| ctx.progress(f))?;
         Ok(())
@@ -437,9 +480,12 @@ impl Step for RenderMarkdown {
         "render_markdown"
     }
 
+    fn ready(&self, _: &Call, dir: &Path) -> bool {
+        has_transcript(dir)
+    }
+
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
-        let json = fs::read_to_string(ctx.dir.join(TRANSCRIPT_JSON)).context("transcript not found")?;
-        let transcript: Transcript = serde_json::from_str(&json)?;
+        let transcript = load_transcript(ctx.dir)?;
         fs::write(ctx.dir.join(TRANSCRIPT_MD), transcript.to_markdown(&call.title))?;
         Ok(())
     }
@@ -486,11 +532,19 @@ impl Step for Summarize {
         "summarize"
     }
 
+    fn optional(&self) -> bool {
+        true
+    }
+
+    fn ready(&self, _: &Call, dir: &Path) -> bool {
+        has_transcript(dir)
+    }
+
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()> {
-        let json = fs::read_to_string(ctx.dir.join(TRANSCRIPT_JSON)).context("transcript not found")?;
-        let transcript: Transcript = serde_json::from_str(&json)?;
+        let transcript = load_transcript(ctx.dir)?;
+        // Nobody spoke: there is nothing to summarize, and nothing wrong with that.
         if transcript.segments.is_empty() {
-            bail!("the transcript is empty");
+            return Ok(());
         }
 
         let mut prompt = format!(
@@ -592,6 +646,49 @@ mod tests {
         call.tracks = vec![track("system-78.m4a", TrackRole::System)];
         library.save(&call).unwrap();
         assert!(pipeline.run(&library, &call.id, false, &|_| {}).is_err());
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    /// Writes an empty transcript, unless it has no model.
+    struct FakeTranscriber {
+        model: bool,
+    }
+
+    impl Transcriber for FakeTranscriber {
+        fn unavailable(&self) -> Option<&'static str> {
+            (!self.model).then_some("no model")
+        }
+
+        fn transcribe(&self, _: &TranscribeRequest, _: Progress) -> Result<Transcript> {
+            Ok(Transcript { language: "es".into(), segments: vec![seg(0, 1000, None)] })
+        }
+    }
+
+    #[test]
+    fn without_a_model_the_call_waits_to_be_transcribed() {
+        let tmp = std::env::temp_dir().join(format!("calls-no-model-{}", std::process::id()));
+        let library = crate::Library::open(tmp.clone()).unwrap();
+        let mut call = library.create_recording("x", "Yo").unwrap();
+        call.tracks.truncate(1);
+        library.save(&call).unwrap();
+        let transcribe = |model| Transcribe {
+            transcriber: Box::new(FakeTranscriber { model }),
+            language: "auto".into(),
+            prompt: None,
+            skips_silences: true,
+        };
+
+        // Nothing failed; what comes after it just has nothing to work on yet.
+        let pipeline = crate::Pipeline::new().with(transcribe(false)).with(RenderMarkdown);
+        pipeline.run(&library, &call.id, false, &|_| {}).unwrap();
+        let waiting = library.load(&call.id).unwrap();
+        assert_eq!(waiting.status, crate::Status::Ready);
+        assert!(waiting.completed_steps.is_empty());
+
+        let pipeline = crate::Pipeline::new().with(transcribe(true)).with(RenderMarkdown);
+        pipeline.run(&library, &call.id, true, &|_| {}).unwrap();
+        let done = library.load(&call.id).unwrap().completed_steps;
+        assert!(["transcribe", "render_markdown", SILENCES].iter().all(|step| done.contains_key(*step)));
         fs::remove_dir_all(tmp).unwrap();
     }
 

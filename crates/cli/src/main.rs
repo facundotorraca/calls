@@ -81,7 +81,9 @@ fn process(library: &Library, settings: &Settings, id: &CallId) -> Result<()> {
         }
         Event::StepPostponed { step, .. } => eprintln!("\r  {step}... postponed"),
         Event::StepFinished { step, .. } => eprintln!("\r  {step}... done"),
-        Event::Failed { step, error, .. } => eprintln!("\r  {step}... failed\n{error}"),
+        Event::StepFailed { step, error, .. } | Event::Failed { step, error, .. } => {
+            eprintln!("\r  {step}... failed\n{error}")
+        }
         Event::Finished { .. } => eprintln!("  -> {}", library.dir(id).join(transcript::TRANSCRIPT_MD).display()),
     })
 }

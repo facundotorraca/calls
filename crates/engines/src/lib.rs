@@ -32,31 +32,36 @@ pub use whisper::WhisperCli;
 
 /// The default processing pipeline, wired with the real engines.
 /// This is the composition root: the only place that knows which engine backs which step.
+///
+/// An optional step that is off, or whose engine is not there (the model not downloaded,
+/// Ollama closed), is left out: nothing to fail, and `Doctor` says what is missing.
 pub fn default_pipeline(settings: &Settings) -> Result<Pipeline> {
     let ffmpeg = Ffmpeg::locate()?;
-    let whisper = WhisperCli::locate(settings.whisper_model_path(), settings.vad_model_path())?;
+    let whisper = WhisperCli::new(settings.whisper_model_path(), settings.vad_model_path());
 
-    let mut pipeline = Pipeline::new().with(ExtractAudio { extractor: Box::new(ffmpeg.clone()) }).with(Transcribe {
-        transcriber: Box::new(whisper),
-        language: settings.language.clone(),
-        prompt: settings.vocabulary_prompt(),
-    });
-    // Off, or the model not downloaded yet: transcripts still work, just without voices.
-    let diarize = settings.diarize && pyannote::is_downloaded();
-    if diarize {
+    let mut pipeline = Pipeline::new()
+        .with(ExtractAudio { extractor: Box::new(ffmpeg.clone()) })
+        // Quick, and first: the call can be listened to whatever happens with the rest.
+        .with(MixPlayback { mixer: Box::new(ffmpeg) })
+        .with(Transcribe {
+            skips_silences: whisper.skips_silences(),
+            transcriber: Box::new(whisper),
+            language: settings.language.clone(),
+            prompt: settings.vocabulary_prompt(),
+        });
+    let diarizer = if settings.diarize && pyannote::is_downloaded() { pyannote::Pyannote::locate().ok() } else { None };
+    let diarize = diarizer.is_some();
+    if let Some(diarizer) = diarizer {
         pipeline = pipeline.with(Diarize {
-            diarizer: Box::new(pyannote::Pyannote::locate()?),
+            diarizer: Box::new(diarizer),
             me: settings.me(),
             my_voice: MyVoice::load(&my_voice_path()),
         });
     }
-    pipeline = pipeline
-        .with(RenderMarkdown)
-        // Quick, and before the LLM: the call can be listened to while it thinks.
-        .with(MixPlayback { mixer: Box::new(ffmpeg) });
+    pipeline = pipeline.with(RenderMarkdown);
 
-    // Last: the transcript is already usable if the LLM is not available.
-    if settings.summarize {
+    // Last: the transcript is already usable, and the model takes long.
+    if settings.summarize && Ollama::new(&settings.llm.base_url, &settings.llm.model)?.check().is_ok() {
         let llm = || Ollama::new(&settings.llm.base_url, &settings.llm.model);
         // Names first, so the summary can say who said what.
         if diarize {

@@ -15,6 +15,18 @@ pub trait Step: Send + Sync {
     /// Stable identifier, persisted in `call.json`. Never rename it once shipped.
     fn id(&self) -> &'static str;
 
+    /// A step the call can do without: when it fails, the call is still ready, and the error
+    /// stays on the step (`Call::step_errors`) until it runs again.
+    fn optional(&self) -> bool {
+        false
+    }
+
+    /// Whether what it works on is there. Until it is, the step waits without a word: nothing
+    /// went wrong, there is just nothing for it to do yet.
+    fn ready(&self, _call: &Call, _dir: &Path) -> bool {
+        true
+    }
+
     fn run(&self, call: &mut Call, ctx: &StepContext) -> Result<()>;
 }
 
@@ -68,6 +80,12 @@ pub enum Event {
         call_id: CallId,
         step: String,
     },
+    /// An optional step failed; the call goes on without it.
+    StepFailed {
+        call_id: CallId,
+        step: String,
+        error: String,
+    },
     Finished {
         call_id: CallId,
     },
@@ -104,11 +122,12 @@ impl Pipeline {
 
         for step in &self.steps {
             let step_id = step.id();
-            if call.completed_steps.contains_key(step_id) {
+            if call.completed_steps.contains_key(step_id) || !step.ready(&call, &dir) {
                 continue;
             }
 
             call.status = Status::Processing { step: step_id.into() };
+            call.step_errors.remove(step_id);
             library.save_progress(&mut call)?;
             emit(Event::StepStarted { call_id: id.clone(), step: step_id.into() });
 
@@ -121,6 +140,12 @@ impl Pipeline {
                     continue;
                 }
                 let error = format!("{e:#}");
+                if step.optional() {
+                    call.step_errors.insert(step_id.into(), error.clone());
+                    library.save_progress(&mut call)?;
+                    emit(Event::StepFailed { call_id: id.clone(), step: step_id.into(), error });
+                    continue;
+                }
                 call.status = Status::Failed { step: step_id.into(), error: error.clone() };
                 library.save_progress(&mut call)?;
                 emit(Event::Failed { call_id: id.clone(), step: step_id.into(), error });
@@ -226,6 +251,89 @@ mod tests {
 
         pipeline.run(&library, &call.id, true, &|_| {}).unwrap();
         assert!(library.load(&call.id).unwrap().completed_steps.contains_key("heavy"));
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    /// Fails the first time, and the call can do without it.
+    struct Extra {
+        runs: AtomicUsize,
+    }
+
+    impl Step for Extra {
+        fn id(&self) -> &'static str {
+            "extra"
+        }
+
+        fn optional(&self) -> bool {
+            true
+        }
+
+        fn run(&self, _: &mut Call, _: &StepContext) -> Result<()> {
+            if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                bail!("no model");
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_optional_step_leaves_the_call_ready_with_its_error() {
+        let tmp = std::env::temp_dir().join(format!("calls-pipeline-optional-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("call.mkv"), b"x").unwrap();
+        let call = library.import(&tmp.join("call.mkv")).unwrap();
+        let pipeline = Pipeline::new()
+            .with(Extra { runs: AtomicUsize::new(0) })
+            .with(Flaky { runs: AtomicUsize::new(0), fail_first: false });
+
+        pipeline.run(&library, &call.id, false, &|_| {}).unwrap();
+        let processed = library.load(&call.id).unwrap();
+        assert_eq!(processed.status, Status::Ready);
+        assert_eq!(processed.step_errors["extra"], "no model");
+        assert!(processed.completed_steps.contains_key("flaky"));
+
+        // Run again, it is retried and its error goes away.
+        pipeline.run(&library, &call.id, true, &|_| {}).unwrap();
+        let retried = library.load(&call.id).unwrap();
+        assert!(retried.step_errors.is_empty());
+        assert!(retried.completed_steps.contains_key("extra"));
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    /// Waits for another step to be done.
+    struct After(&'static str);
+
+    impl Step for After {
+        fn id(&self) -> &'static str {
+            "after"
+        }
+
+        fn ready(&self, call: &Call, _: &Path) -> bool {
+            call.completed_steps.contains_key(self.0)
+        }
+
+        fn run(&self, _: &mut Call, _: &StepContext) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_step_not_ready_waits_without_a_word() {
+        let tmp = std::env::temp_dir().join(format!("calls-pipeline-ready-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("call.mkv"), b"x").unwrap();
+        let call = library.import(&tmp.join("call.mkv")).unwrap();
+        let events = Mutex::new(Vec::new());
+        let emit = |e: Event| events.lock().unwrap().push(e);
+
+        Pipeline::new().with(After("heavy")).run(&library, &call.id, false, &emit).unwrap();
+        assert!(matches!(events.lock().unwrap().as_slice(), [Event::Finished { .. }]));
+        let waited = library.load(&call.id).unwrap();
+        assert_eq!(waited.status, Status::Ready);
+        assert!(!waited.completed_steps.contains_key("after"));
+
+        Pipeline::new().with(Heavy).with(After("heavy")).run(&library, &call.id, true, &|_| {}).unwrap();
+        assert!(library.load(&call.id).unwrap().completed_steps.contains_key("after"));
         fs::remove_dir_all(tmp).unwrap();
     }
 }

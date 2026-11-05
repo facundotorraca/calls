@@ -899,13 +899,6 @@ code {
   transform: rotate(180deg) translateX(2px);
 }
 
-.call-rail-sep {
-  width: 1px;
-  height: 14px;
-  margin-inline: -8px;
-  background: var(--border);
-}
-
 /* ── Pipeline ── */
 
 /* What happens to a call, as a line of squares: a square per stage, a rule to the next. The

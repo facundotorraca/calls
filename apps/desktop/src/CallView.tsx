@@ -260,11 +260,9 @@ export function CallView({
     <article className="call-view">
       <header className="call-header dot-grid">
         <div className="call-rail">
-          <button className="ghost-button tech-label back-button" onClick={onBack} title="Volver (esc)">
+          <button className="ghost-button tech-label back-button" onClick={onBack} title={`Volver a ${back} (esc)`}>
             <ChevronIcon className="chevron-back" />
-            {back}
           </button>
-          <span className="call-rail-sep" aria-hidden />
           <button
             className="folder-chip tech-label"
             data-color={folderColor(folders, call.folder)}

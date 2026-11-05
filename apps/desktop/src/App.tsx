@@ -322,7 +322,7 @@ export function App() {
             <input
               ref={searchInput}
               type="search"
-              placeholder="Buscar en todo  ⌘F"
+              placeholder="Buscar  ⌘F"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);

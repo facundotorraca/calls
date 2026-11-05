@@ -682,20 +682,19 @@ code {
   background: var(--accent);
 }
 
-.call-item.selected {
-  background: color-mix(in oklch, var(--foreground) 6%, transparent);
-}
-
 .call-item.dragging {
   opacity: 0.4;
 }
 
 .call-title {
   overflow: hidden;
-  font-size: 13.5px;
-  font-weight: 500;
+  font-size: 13px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.call-item.selected .call-title {
+  font-weight: 500;
 }
 
 /* One line, whatever the width: the date never gives way, the folder's name does. */

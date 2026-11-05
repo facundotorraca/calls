@@ -23,7 +23,8 @@ pub struct Settings {
     /// Names and terms the transcriber tends to get wrong (people, clients, products,
     /// acronyms), spelled the way they should be written.
     pub vocabulary: Vec<String>,
-    /// Tell the voices of a call apart (needs the pyannote model, downloaded once).
+    /// Tell the voices of a call apart (needs the pyannote model, downloaded once). Off until
+    /// asked for, like the summary: what a computer cannot run should not get in its way.
     pub diarize: bool,
     /// Voice activity detection model, used to skip silences (avoids made up text in them).
     /// Ignored if the file is not present.
@@ -74,12 +75,12 @@ impl Default for Settings {
             language: "auto".into(),
             whisper_model: "large-v3-turbo".into(),
             vocabulary: Vec::new(),
-            diarize: true,
+            diarize: false,
             vad_model: Some("silero-v6.2.0".into()),
             detect_calls: true,
             auto_record: false,
             call_apps: CallApp::defaults(),
-            summarize: true,
+            summarize: false,
             summary_language: "español".into(),
             llm: LlmSettings::default(),
             notion: NotionSettings::default(),

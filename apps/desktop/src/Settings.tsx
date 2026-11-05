@@ -1,37 +1,37 @@
-// The settings window (⌘,): general preferences and the AI models, which ones are on disk
-// and which ones the app uses.
+// The settings window (⌘,): general preferences, and the pipeline: which of its stages run on
+// this computer and with which models.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   api,
-  onDownload,
   onSettingsChanged,
-  type DownloadTarget,
   type Folder,
   type LocalModel,
   type OllamaModel,
   type Settings as SettingsData,
   type SettingsPage as Page,
 } from "./api";
+import { DownloadControl, downloadKey as key, useDownloads, type Downloads } from "./downloads";
 import { formatBytes } from "./format";
-import { ExternalIcon, FinderIcon, PageIcon, SlidersIcon, SparklesIcon, TextIcon } from "./icons";
+import { ExternalIcon, FinderIcon, PageIcon, SlidersIcon, SparklesIcon } from "./icons";
 import { PagePicker } from "./Notion";
 import { usePersistentState } from "./ui";
 
 
 const PAGES: { id: Page; label: string; icon: ReactNode; group?: string }[] = [
   { id: "general", label: "General", icon: <SlidersIcon /> },
-  { id: "transcription", label: "Transcripción", icon: <TextIcon />, group: "ia" },
-  { id: "summary", label: "Resumen", icon: <SparklesIcon />, group: "ia" },
+  { id: "pipeline", label: "Pipeline", icon: <SparklesIcon /> },
   { id: "notion", label: "Notion", icon: <PageIcon />, group: "integraciones" },
 ];
 
 const isPage = (page: string): page is Page => PAGES.some((p) => p.id === page);
 
 export function Settings() {
-  const [page, setPage] = usePersistentState<Page>("settings.page", "general");
+  const [saved, setPage] = usePersistentState<string>("settings.page", "general");
+  // A page remembered from another version may be gone.
+  const page: Page = isPage(saved) ? saved : "general";
 
   // Opened (or brought up) from somewhere that needs a page: index.html#notion, or an event.
   useEffect(() => {
@@ -74,10 +74,8 @@ export function Settings() {
         {settings &&
           (page === "general" ? (
             <GeneralPage settings={settings} save={save} />
-          ) : page === "transcription" ? (
-            <TranscriptionPage settings={settings} save={save} downloads={downloads} />
-          ) : page === "summary" ? (
-            <SummaryPage settings={settings} save={save} downloads={downloads} />
+          ) : page === "pipeline" ? (
+            <PipelinePage settings={settings} save={save} downloads={downloads} />
           ) : (
             <NotionSettingsPage settings={settings} save={save} />
           ))}
@@ -116,50 +114,6 @@ function useSettings(): [SettingsData | null, Save, string | null] {
   );
 
   return [settings, save, error];
-}
-
-const key = (t: DownloadTarget) => `${t.kind}:${t.name}`;
-
-interface Downloads {
-  /** Fraction done of each running download, by `kind:name`. */
-  progress: Record<string, number>;
-  /** Why the last download of each failed. */
-  errors: Record<string, string>;
-  /** Bumped when a download finishes, to reload the lists. */
-  finished: number;
-  start: (target: DownloadTarget, token?: string) => void;
-  cancel: (target: DownloadTarget) => void;
-}
-
-/** Downloads run in the app, not in this window: closing it does not stop them. */
-function useDownloads(): Downloads {
-  const [progress, setProgress] = useState<Record<string, number>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [finished, setFinished] = useState(0);
-
-  useEffect(() => {
-    api.downloads().then((running) => setProgress(Object.fromEntries(running.map((d) => [key(d), d.fraction]))));
-    const unlisten = onDownload((event) => {
-      const k = key(event);
-      if (event.state === "progress") {
-        setProgress((p) => ({ ...p, [k]: event.fraction }));
-        return;
-      }
-      setProgress(({ [k]: _, ...rest }) => rest);
-      if (event.state === "failed") setErrors((e) => ({ ...e, [k]: event.error }));
-      setFinished((n) => n + 1);
-    });
-    return () => void unlisten.then((fn) => fn());
-  }, []);
-
-  const start = useCallback((target: DownloadTarget, token?: string) => {
-    const k = key(target);
-    setErrors(({ [k]: _, ...rest }) => rest);
-    setProgress((p) => ({ ...p, [k]: 0 }));
-    api.startDownload(target, token);
-  }, []);
-
-  return { progress, errors, finished, start, cancel: api.cancelDownload };
 }
 
 // ── Pages ────────────────────────────────────────────────────────────────
@@ -263,26 +217,96 @@ const CALL_LANGUAGES = [
   ["it", "Italiano"],
 ];
 
-function TranscriptionPage({
-  settings,
-  save,
-  downloads,
-}: {
+interface StageProps {
   settings: SettingsData;
   save: Save;
   downloads: Downloads;
-}) {
+}
+
+/** The pipeline standing up: what happens to a call, in order. Only the transcription is a
+ * must; the rest is turned on where the computer can take it, and asks for what it needs then. */
+function PipelinePage({ settings, save, downloads }: StageProps) {
+  const [transcribing, setTranscribing] = useState<boolean | null>(null);
+  const check = useCallback(() => void api.doctor().then((d) => setTranscribing(d.whisper_model_present)), []);
+  useEffect(check, [check, downloads.finished, settings.whisper_model]);
+
+  return (
+    <SettingsPage
+      title="pipeline"
+      status={
+        transcribing === false ? (
+          <State tone="error">falta el modelo de transcripción</State>
+        ) : transcribing ? (
+          <State tone="ok">listo para transcribir</State>
+        ) : null
+      }
+    >
+      <div className="stage-list">
+        <Stage
+          label="audio"
+          hint="Saca el audio de lo que grabás o importás y lo deja listo para escuchar. Viene con la app."
+          tone="ok"
+          control={<State tone="ok">incluido</State>}
+        />
+        <SilencesStage settings={settings} save={save} downloads={downloads} />
+        <TranscribeStage settings={settings} save={save} downloads={downloads} />
+        <VoicesStage settings={settings} save={save} downloads={downloads} />
+        <SummaryStage settings={settings} save={save} downloads={downloads} />
+      </div>
+      <p className="field-hint">
+        Lo que cambies acá vale para las próximas llamadas. Para rehacer una que ya está, tocá «reprocesar» en la llamada.
+      </p>
+    </SettingsPage>
+  );
+}
+
+function SilencesStage({ settings, save, downloads }: StageProps) {
   const [models, setModels] = useState<LocalModel[]>([]);
-  const [vadModels, setVadModels] = useState<LocalModel[]>([]);
+  useEffect(() => void api.localModels("vad").then(setModels), [downloads.finished]);
+
+  const on = settings.vad_model != null;
+  const vad = models.find((m) => m.name === settings.vad_model) ?? models[0];
+  const target = vad && ({ kind: "vad", name: vad.name } as const);
+  const waiting = on && vad && !vad.downloaded;
+
+  return (
+    <Stage
+      label="silencios"
+      hint="Saltea las partes sin voz, para que Whisper no invente texto en ellas."
+      on={on}
+      tone={waiting ? "wait" : "ok"}
+      control={
+        <>
+          {waiting && target && (
+            <DownloadControl
+              progress={downloads.progress[key(target)]}
+              bytes={vad.bytes}
+              onDownload={() => downloads.start(target)}
+              onCancel={() => downloads.cancel(target)}
+            />
+          )}
+          <Switch
+            checked={on}
+            onChange={(next) => {
+              save({ vad_model: next ? (vad?.name ?? null) : null });
+              // Under a MB: not worth asking.
+              if (next && vad && !vad.downloaded && target) downloads.start(target);
+            }}
+          />
+        </>
+      }
+    >
+      {target && downloads.errors[key(target)] && <p className="model-error">{downloads.errors[key(target)]}</p>}
+    </Stage>
+  );
+}
+
+function TranscribeStage({ settings, save, downloads }: StageProps) {
+  const [models, setModels] = useState<LocalModel[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
 
-  const [diarizationReady, setDiarizationReady] = useState<boolean | null>(null);
-
-  const reload = useCallback(() => {
-    api.localModels("whisper").then(setModels);
-    api.localModels("vad").then(setVadModels);
-    api.diarizationReady().then(setDiarizationReady);
-  }, []);
+  const reload = useCallback(() => void api.localModels("whisper").then(setModels), []);
   useEffect(reload, [reload, downloads.finished]);
 
   const remove = async (name: string) => {
@@ -291,90 +315,75 @@ function TranscriptionPage({
   };
 
   const active = models.find((m) => m.name === settings.whisper_model);
-  const vad = vadModels.find((m) => m.name === settings.vad_model) ?? vadModels[0];
-  const vadTarget = vad && ({ kind: "vad", name: vad.name } as const);
+  const shown = models.filter(
+    (m) => all || m.name === settings.whisper_model || downloads.progress[key({ kind: "whisper", name: m.name })] != null,
+  );
 
   return (
-    <SettingsPage
-      title="transcripción"
-      status={
-        active?.downloaded ? (
-          <State tone="ok">whisper · {settings.whisper_model}</State>
-        ) : (
-          <State tone="error">falta descargar {settings.whisper_model}</State>
-        )
+    <Stage
+      label="transcribir"
+      hint="Pasa la voz a texto, en esta compu. Sin esto no hay lo que sigue."
+      tone={active?.downloaded ? "ok" : "wait"}
+      control={
+        active?.downloaded ? <State tone="ok">{settings.whisper_model}</State> : <State tone="wait">falta modelo</State>
       }
     >
-      <Group label="idioma">
-        <Field label="Idioma de las llamadas" hint="Automático lo detecta en cada llamada.">
-          <Select value={settings.language} options={CALL_LANGUAGES} onChange={(language) => save({ language })} />
-        </Field>
-      </Group>
-
-      <Group
-        label="vocabulario"
-        meta={settings.vocabulary.length > 0 ? `${settings.vocabulary.length} términos` : undefined}
-      >
-        <div className="vocabulary">
-          <p className="field-hint">
-            Nombres de personas, clientes, productos y siglas que Whisper escribe mal, tal como se escriben. Uno por
-            línea. Se usa en las próximas transcripciones y en los resúmenes.
-          </p>
-          <TermsInput value={settings.vocabulary} onCommit={(vocabulary) => save({ vocabulary })} />
-        </div>
-      </Group>
-
-      <Group label="modelo" meta="whisper.cpp · local">
-        {error && <p className="model-error">{error}</p>}
-        {models.map((model) => {
-          const target = { kind: "whisper", name: model.name } as const;
-          return (
-            <ModelRow
-              key={model.name}
-              name={model.name}
-              detail={model.note}
-              bytes={model.bytes}
-              inUse={model.name === settings.whisper_model}
-              downloaded={model.downloaded}
-              progress={downloads.progress[key(target)]}
-              error={downloads.errors[key(target)]}
-              onUse={() => save({ whisper_model: model.name })}
-              onDownload={() => downloads.start(target)}
-              onCancel={() => downloads.cancel(target)}
-              onDelete={() => remove(model.name)}
-            />
-          );
-        })}
-      </Group>
-
-      <Group label="hablantes" meta="pyannote · local">
-        <Field
-          label="Separar hablantes"
-          hint="Distingue cada voz: en las grabaciones importadas, a todos; en las grabadas, a los del otro lado (vos ya sos «Yo»). Con el resumen activo, la IA les pone nombre cuando la llamada lo dice."
-        >
-          {diarizationReady && <State tone="ok">listo</State>}
-          <Switch checked={settings.diarize} onChange={(diarize) => save({ diarize })} />
-        </Field>
-        {settings.diarize && diarizationReady === false && <DiarizationSetup downloads={downloads} />}
-      </Group>
-
-      <Group label="silencios">
-        <Field label="Saltear silencios" hint="Detecta las partes sin voz para que Whisper no invente texto en ellas.">
-          {vadTarget && settings.vad_model && !vad.downloaded ? (
-            <DownloadControl
-              progress={downloads.progress[key(vadTarget)]}
-              bytes={vad.bytes}
-              onDownload={() => downloads.start(vadTarget)}
-              onCancel={() => downloads.cancel(vadTarget)}
-            />
-          ) : null}
-          <Switch
-            checked={settings.vad_model != null}
-            onChange={(on) => save({ vad_model: on ? (vad?.name ?? null) : null })}
+      {error && <p className="model-error">{error}</p>}
+      {shown.map((model) => {
+        const target = { kind: "whisper", name: model.name } as const;
+        return (
+          <ModelRow
+            key={model.name}
+            name={model.name}
+            detail={model.note}
+            bytes={model.bytes}
+            inUse={model.name === settings.whisper_model}
+            downloaded={model.downloaded}
+            progress={downloads.progress[key(target)]}
+            error={downloads.errors[key(target)]}
+            onUse={() => save({ whisper_model: model.name })}
+            onDownload={() => downloads.start(target)}
+            onCancel={() => downloads.cancel(target)}
+            onDelete={() => remove(model.name)}
           />
-        </Field>
-      </Group>
-    </SettingsPage>
+        );
+      })}
+      <MoreModels all={all} count={models.length} onToggle={() => setAll(!all)} />
+      <Field label="Idioma de las llamadas" hint="Automático lo detecta en cada llamada.">
+        <Select value={settings.language} options={CALL_LANGUAGES} onChange={(language) => save({ language })} />
+      </Field>
+      <div className="vocabulary">
+        <p className="field-label">Vocabulario</p>
+        <p className="field-hint">
+          Nombres de personas, clientes, productos y siglas que Whisper escribe mal, tal como se escriben. Uno por línea. Se
+          usa en las próximas transcripciones y en los resúmenes.
+        </p>
+        <TermsInput value={settings.vocabulary} onCommit={(vocabulary) => save({ vocabulary })} />
+      </div>
+    </Stage>
+  );
+}
+
+function VoicesStage({ settings, save, downloads }: StageProps) {
+  const [ready, setReady] = useState<boolean | null>(null);
+  useEffect(() => void api.diarizationReady().then(setReady), [downloads.finished]);
+  const waiting = settings.diarize && ready === false;
+
+  return (
+    <Stage
+      label="voces"
+      hint="Distingue cada voz: en las grabaciones importadas, a todos; en las grabadas, a los del otro lado (vos ya sos «Yo»). Pide más máquina que transcribir."
+      on={settings.diarize}
+      tone={waiting ? "wait" : "ok"}
+      control={
+        <>
+          {waiting && <State tone="wait">falta modelo</State>}
+          <Switch checked={settings.diarize} onChange={(diarize) => save({ diarize })} />
+        </>
+      }
+    >
+      {waiting && <DiarizationSetup downloads={downloads} />}
+    </Stage>
   );
 }
 
@@ -575,14 +584,16 @@ const SUMMARY_LANGUAGES = [
   ["português", "Portugués"],
 ];
 
-function SummaryPage({ settings, save, downloads }: { settings: SettingsData; save: Save; downloads: Downloads }) {
+function SummaryStage({ settings, save, downloads }: StageProps) {
   const [models, setModels] = useState<OllamaModel[] | null>(null);
   const [offline, setOffline] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pull, setPull] = useState("");
-  const { llm } = settings;
+  const [all, setAll] = useState(false);
+  const { llm, summarize } = settings;
 
   const reload = useCallback(() => {
+    if (!summarize) return;
     api.ollamaModels().then(
       (list) => {
         setModels(list);
@@ -593,7 +604,7 @@ function SummaryPage({ settings, save, downloads }: { settings: SettingsData; sa
         setOffline(String(e));
       },
     );
-  }, []);
+  }, [summarize]);
   useEffect(reload, [reload, downloads.finished, llm.base_url]);
 
   const remove = async (name: string) => {
@@ -615,116 +626,131 @@ function SummaryPage({ settings, save, downloads }: { settings: SettingsData; sa
     ...Object.keys(downloads.progress)
       .filter((k) => k.startsWith("ollama:"))
       .map((k) => k.slice("ollama:".length)),
-  ].filter((name, i, all) => all.indexOf(name) === i && !installed.some((m) => m.name === name));
+  ].filter((name, i, list) => list.indexOf(name) === i && !installed.some((m) => m.name === name));
 
   const ready = installed.some((m) => m.name === llm.model);
+  const waiting = summarize && (offline != null || (models != null && !ready));
 
   return (
-    <SettingsPage
-      title="resumen"
-      status={
-        offline ? (
-          <State tone="error">ollama no responde</State>
-        ) : models && !ready ? (
-          <State tone="error">falta descargar {llm.model}</State>
-        ) : models ? (
-          <State tone="ok">ollama · {llm.model}</State>
-        ) : null
+    <Stage
+      label="resumen"
+      hint="Resumen, decisiones y pendientes con una IA local, y nombres para las voces cuando la llamada los dice. Es lo que más máquina pide: en una compu liviana, dejalo apagado."
+      on={summarize}
+      tone={waiting ? "wait" : "ok"}
+      control={
+        <>
+          {summarize && offline && <State tone="wait">sin ollama</State>}
+          {summarize && !offline && models && !ready && <State tone="wait">falta modelo</State>}
+          {summarize && ready && <State tone="ok">{llm.model}</State>}
+          <Switch checked={summarize} onChange={(next) => save({ summarize: next })} />
+        </>
       }
     >
-      <Group label="resumen">
-        <Field label="Resumir las llamadas" hint="Resumen, decisiones y pendientes al terminar de transcribir.">
-          <Switch checked={settings.summarize} onChange={(summarize) => save({ summarize })} />
-        </Field>
-        <Field label="Idioma del resumen" hint="Se escribe en este idioma, sea cual sea el de la llamada.">
-          <Select
-            value={settings.summary_language}
-            options={SUMMARY_LANGUAGES}
-            onChange={(summary_language) => save({ summary_language })}
-          />
-        </Field>
-      </Group>
-
-      <Group label="ollama" meta="modelos locales">
-        <Field
-          label="Servidor"
-          hint={offline ? <span className="hint-error">{offline}</span> : "Donde corre Ollama. Abrí la app de Ollama."}
-        >
-          {offline && (
-            <button className="ghost-button tech-label" onClick={reload}>
-              reintentar
-            </button>
-          )}
-          <TextInput value={llm.base_url} onCommit={(base_url) => save({ llm: { ...llm, base_url } })} />
-        </Field>
-      </Group>
-
-      {!offline && (
-        <Group label="modelo" meta={models ? `${installed.length} instalados` : undefined}>
-          {error && <p className="model-error">{error}</p>}
-          {installed.map((model) => {
-            const target = { kind: "ollama", name: model.name } as const;
-            return (
-              <ModelRow
-                key={model.name}
-                name={model.name}
-                detail={[model.details.parameter_size, model.details.quantization_level].filter(Boolean).join(" · ")}
-                bytes={model.size}
-                inUse={model.name === llm.model}
-                downloaded
-                progress={downloads.progress[key(target)]}
-                error={downloads.errors[key(target)]}
-                onUse={() => save({ llm: { ...llm, model: model.name } })}
-                onDelete={() => remove(model.name)}
-              />
-            );
-          })}
-          {pending.map((name) => {
-            const target = { kind: "ollama", name } as const;
-            return (
-              <ModelRow
-                key={name}
-                name={name}
-                detail={name === llm.model ? "Elegido, pero Ollama no lo tiene" : null}
-                bytes={null}
-                inUse={name === llm.model}
-                downloaded={false}
-                progress={downloads.progress[key(target)]}
-                error={downloads.errors[key(target)]}
-                onDownload={() => downloads.start(target)}
-                onCancel={() => downloads.cancel(target)}
-              />
-            );
-          })}
-          <form
-            className="model-pull"
-            onSubmit={(e) => {
-              e.preventDefault();
-              startPull(pull);
-            }}
-          >
-            <input
-              className="text-input"
-              placeholder="Otro modelo, como en ollama pull"
-              value={pull}
-              onChange={(e) => setPull(e.target.value)}
-              spellCheck={false}
+      {summarize && (
+        <>
+          <Field label="Idioma del resumen" hint="Se escribe en este idioma, sea cual sea el de la llamada.">
+            <Select
+              value={settings.summary_language}
+              options={SUMMARY_LANGUAGES}
+              onChange={(summary_language) => save({ summary_language })}
             />
-            <button className="button" type="submit" disabled={!pull.trim()}>
-              descargar
-            </button>
-            <button
-              className="ghost-button tech-label"
-              type="button"
-              onClick={() => openUrl("https://ollama.com/search")}
-            >
-              <ExternalIcon />
-              explorar
-            </button>
-          </form>
-        </Group>
+          </Field>
+          <Field
+            label="Ollama"
+            hint={
+              offline ? (
+                <span className="hint-error">No responde: instalalo y abrilo, y volvé a probar.</span>
+              ) : (
+                "Corre los modelos en esta compu. Se instala aparte."
+              )
+            }
+          >
+            {offline && (
+              <>
+                <button className="ghost-button tech-label" onClick={() => openUrl("https://ollama.com/download")}>
+                  <ExternalIcon />
+                  instalar
+                </button>
+                <button className="ghost-button tech-label" onClick={reload}>
+                  reintentar
+                </button>
+              </>
+            )}
+            <TextInput value={llm.base_url} onCommit={(base_url) => save({ llm: { ...llm, base_url } })} />
+          </Field>
+          {!offline && (
+            <>
+              {error && <p className="model-error">{error}</p>}
+              {installed
+                .filter((model) => all || model.name === llm.model)
+                .map((model) => {
+                  const target = { kind: "ollama", name: model.name } as const;
+                  return (
+                    <ModelRow
+                      key={model.name}
+                      name={model.name}
+                      detail={[model.details.parameter_size, model.details.quantization_level].filter(Boolean).join(" · ")}
+                      bytes={model.size}
+                      inUse={model.name === llm.model}
+                      downloaded
+                      progress={downloads.progress[key(target)]}
+                      error={downloads.errors[key(target)]}
+                      onUse={() => save({ llm: { ...llm, model: model.name } })}
+                      onDelete={() => remove(model.name)}
+                    />
+                  );
+                })}
+              {pending.map((name) => {
+                const target = { kind: "ollama", name } as const;
+                return (
+                  <ModelRow
+                    key={name}
+                    name={name}
+                    detail={name === llm.model ? "Elegido, pero Ollama no lo tiene" : null}
+                    bytes={null}
+                    inUse={name === llm.model}
+                    downloaded={false}
+                    progress={downloads.progress[key(target)]}
+                    error={downloads.errors[key(target)]}
+                    onDownload={() => downloads.start(target)}
+                    onCancel={() => downloads.cancel(target)}
+                  />
+                );
+              })}
+              <MoreModels all={all} count={installed.length} onToggle={() => setAll(!all)} />
+              {all && (
+                <form
+                  className="model-pull"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    startPull(pull);
+                  }}
+                >
+                  <input
+                    className="text-input"
+                    placeholder="Otro modelo, como en ollama pull"
+                    value={pull}
+                    onChange={(e) => setPull(e.target.value)}
+                    spellCheck={false}
+                  />
+                  <button className="button" type="submit" disabled={!pull.trim()}>
+                    descargar
+                  </button>
+                  <button
+                    className="ghost-button tech-label"
+                    type="button"
+                    onClick={() => openUrl("https://ollama.com/search")}
+                  >
+                    <ExternalIcon />
+                    explorar
+                  </button>
+                </form>
+              )}
+            </>
+          )}
+        </>
       )}
-    </SettingsPage>
+    </Stage>
   );
 }
 
@@ -755,6 +781,50 @@ function Group({ label, meta, children }: { label: string; meta?: string; childr
   );
 }
 
+/** A stage of the pipeline: a square on the line, what it does, and its switch if it has one.
+ * What it needs shows only while it is on. */
+function Stage({
+  label,
+  hint,
+  on = true,
+  tone,
+  control,
+  children,
+}: {
+  label: string;
+  hint: string;
+  on?: boolean;
+  tone: "ok" | "wait";
+  control: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="group stage-group" data-on={on} data-tone={on ? tone : undefined}>
+      <div className="group-rail tech-label">
+        <span className="stage-name">
+          <span className="stage-mark" />
+          {label}
+        </span>
+        <span className="stage-control">{control}</span>
+      </div>
+      <p className="stage-hint">{hint}</p>
+      {on && children}
+    </section>
+  );
+}
+
+/** Only the model in use shows, until the others are asked for. */
+function MoreModels({ all, count, onToggle }: { all: boolean; count: number; onToggle: () => void }) {
+  if (count < 2) return null;
+  return (
+    <div className="model-more">
+      <button className="ghost-button tech-label" onClick={onToggle}>
+        {all ? "ver solo el elegido" : `ver todos (${count})`}
+      </button>
+    </div>
+  );
+}
+
 function Field({
   label,
   hint,
@@ -777,7 +847,7 @@ function Field({
   );
 }
 
-function State({ tone, children }: { tone: "ok" | "error"; children: ReactNode }) {
+function State({ tone, children }: { tone: "ok" | "wait" | "error"; children: ReactNode }) {
   return (
     <span className={`state ${tone}`}>
       <span className="state-mark" />
@@ -954,39 +1024,6 @@ function ModelRow({
         )}
       </div>
     </div>
-  );
-}
-
-function DownloadControl({
-  progress,
-  bytes,
-  onDownload,
-  onCancel,
-}: {
-  progress?: number;
-  bytes?: number | null;
-  onDownload?: () => void;
-  onCancel?: () => void;
-}) {
-  if (progress == null) {
-    return (
-      <button className="button" onClick={onDownload}>
-        descargar{bytes != null && ` · ${formatBytes(bytes)}`}
-      </button>
-    );
-  }
-  return (
-    <span className="download">
-      <span className="bar">
-        <span style={{ width: `${progress * 100}%` }} />
-      </span>
-      <span className="download-pct tech-label">{Math.floor(progress * 100)}%</span>
-      {onCancel && (
-        <button className="ghost-button tech-label" onClick={onCancel}>
-          cancelar
-        </button>
-      )}
-    </span>
   );
 }
 

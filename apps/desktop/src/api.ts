@@ -328,7 +328,7 @@ export const onLibraryChanged = (handler: () => void) => listen("library_changed
 export const onSelectCall = (handler: (id: CallId) => void) => listen<CallId>("select_call", (e) => handler(e.payload));
 
 /** The pages of the settings window. */
-export type SettingsPage = "general" | "transcription" | "summary" | "notion";
+export type SettingsPage = "general" | "pipeline" | "notion";
 
 /** The speaker label of the person using the app. */
 export const me = (settings: Settings) => settings.user_name.trim() || "Yo";

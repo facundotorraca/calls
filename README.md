@@ -172,7 +172,8 @@ The original recording is referenced, never copied or moved. Settings and models
   "detect_calls": true,
   "auto_record": false,
   "call_apps": [{ "bundle_prefix": "us.zoom.xos", "name": "Zoom" }],
-  "summarize": true,
+  "diarize": false,
+  "summarize": false,
   "summary_language": "español",
   "llm": { "base_url": "http://localhost:11434", "model": "qwen3.5:35b" }
 }

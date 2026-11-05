@@ -362,7 +362,7 @@ export function App() {
       </aside>
 
       <main className="content">
-        {doctor && <SetupBanner doctor={doctor} />}
+        {doctor && settings && <SetupBanner doctor={doctor} settings={settings} />}
         {error && (
           <div className="banner error banner-dismiss" onClick={() => setError(null)}>
             <div className="banner-rail tech-label">

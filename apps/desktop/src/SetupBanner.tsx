@@ -1,51 +1,58 @@
-import type { ReactNode } from "react";
-import { api, type Doctor, type SettingsPage } from "./api";
+import { useEffect, useState } from "react";
+import { api, type Doctor, type LocalModel, type Settings } from "./api";
+import { DownloadControl, downloadKey, useDownloads } from "./downloads";
 
-/** Tells the user exactly what is missing and how to fix it. */
-export function SetupBanner({ doctor }: { doctor: Doctor }) {
-  const settingsButton = (page: SettingsPage) => (
-    <button className="ghost-button tech-label" onClick={() => api.openSettings(page)}>
-      ajustes
-    </button>
-  );
+/** The one thing a new install needs before it can transcribe, a click away. Everything else
+ * is optional and waits in the settings until it is asked for. */
+export function SetupBanner({ doctor, settings }: { doctor: Doctor; settings: Settings }) {
+  const downloads = useDownloads();
+  const [model, setModel] = useState<LocalModel | null>(null);
+  const name = settings.whisper_model;
 
-  const missing: [string, ReactNode][] = [];
-  if (!doctor.ffmpeg) missing.push(["ffmpeg", <code>brew install ffmpeg</code>]);
-  if (!doctor.whisper_cli) missing.push(["whisper-cli", <code>make sidecars</code>]);
-  if (!doctor.whisper_model_present) missing.push(["el modelo de Whisper", settingsButton("transcription")]);
-  if (!doctor.calls_audio) missing.push(["calls-audio (grabar llamadas)", <code>make sidecars</code>]);
-  if (missing.length === 0) {
-    // Not blocking: transcripts work without the LLM.
-    return doctor.llm_error ? (
+  useEffect(() => {
+    api.localModels("whisper").then((models) => setModel(models.find((m) => m.name === name) ?? null));
+  }, [name, downloads.finished]);
+
+  // Bundled with the app: only a build from source can be missing them.
+  const sidecars = [
+    !doctor.ffmpeg && "ffmpeg",
+    !doctor.whisper_cli && "whisper-cli",
+    !doctor.calls_audio && "calls-audio",
+  ].filter(Boolean);
+
+  if (sidecars.length > 0) {
+    return (
       <div className="banner">
         <div className="banner-rail tech-label">
-          <span>resúmenes no disponibles</span>
-          {settingsButton("summary")}
+          <span>falta compilar</span>
+          <code>make sidecars</code>
         </div>
-        <div className="banner-body muted">{doctor.llm_error}</div>
+        <div className="banner-body muted">{sidecars.join(", ")}</div>
       </div>
-    ) : null;
+    );
   }
+  if (doctor.whisper_model_present) return null;
 
+  const target = { kind: "whisper", name } as const;
+  const error = downloads.errors[downloadKey(target)];
   return (
     <div className="banner">
       <div className="banner-rail tech-label">
-        <span>configuración</span>
-        <span>
-          {missing.length} pendiente{missing.length === 1 ? "" : "s"}
-        </span>
+        <span>un paso más</span>
+        <button className="ghost-button tech-label" onClick={() => api.openSettings("pipeline")}>
+          elegir otro modelo
+        </button>
       </div>
-      <div className="banner-body">
-        <p className="muted">Falta configurar algunas cosas para poder transcribir:</p>
-        <ul>
-          {missing.map(([what, fix]) => (
-            <li key={what}>
-              {what}
-              {fix}
-            </li>
-          ))}
-        </ul>
+      <div className="banner-body setup-now">
+        <p className="muted">Para transcribir falta el modelo: {name}. Se descarga una sola vez.</p>
+        <DownloadControl
+          progress={downloads.progress[downloadKey(target)]}
+          bytes={model?.bytes}
+          onDownload={() => downloads.start(target)}
+          onCancel={() => downloads.cancel(target)}
+        />
       </div>
+      {error && <p className="model-error setup-now-error">{error}</p>}
     </div>
   );
 }

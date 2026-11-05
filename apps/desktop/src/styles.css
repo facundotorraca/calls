@@ -3078,6 +3078,116 @@ mark.hl {
   width: auto;
 }
 
+/* ── Pipeline, in the settings: the same line, standing, with each stage's panel on it ── */
+
+.stage-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-group + .stage-group {
+  position: relative;
+  margin-top: 16px;
+}
+
+/* The rule from the stage before, down the same column as the squares. */
+.stage-group + .stage-group::before {
+  content: "";
+  position: absolute;
+  top: -17px;
+  left: 15px;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+.stage-group > .group-rail:last-child {
+  border-bottom: 0;
+}
+
+.stage-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--foreground);
+}
+
+.stage-group[data-on="false"] .stage-name {
+  color: var(--muted-foreground);
+}
+
+.stage-group .stage-mark {
+  --tint: var(--faint);
+}
+
+.stage-group[data-tone="ok"] .stage-mark {
+  --tint: var(--settled);
+  background: var(--tint);
+}
+
+.stage-group[data-tone="wait"] .stage-mark {
+  --tint: var(--pending);
+}
+
+.stage-group[data-tone="error"] .stage-mark {
+  --tint: var(--destructive);
+}
+
+.stage-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The stage's square already says it. */
+.stage-control .state-mark {
+  display: none;
+}
+
+.stage-hint {
+  padding: 10px 12px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+
+.stage-hint + * {
+  border-top: 1px solid var(--border);
+}
+
+.model-more {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.stage-group .model-row + .field,
+.stage-group .model-more + .field,
+.stage-group .field + .model-row,
+.stage-group .field + .vocabulary {
+  border-top: 1px solid var(--border);
+}
+
+.state.wait {
+  color: var(--pending);
+}
+
+.state.wait .state-mark {
+  border: 1px solid var(--pending);
+}
+
+/* The banner of a new install: what is missing, and the button that gets it. */
+.setup-now {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-now-error {
+  padding: 0 12px 12px;
+}
+
 /* ── Island window: transparent, only the strip is visible ──────────── */
 
 html.island-window,

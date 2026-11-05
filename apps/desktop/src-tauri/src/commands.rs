@@ -20,7 +20,7 @@ use calls_engines::{Doctor, Ffmpeg, default_pipeline, pyannote};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::downloads::{self, Running, Target};
+use crate::downloads::{self, Kind, Running, Target};
 use crate::recorder::Island;
 use crate::{AppState, show_main};
 
@@ -473,7 +473,16 @@ pub async fn start_download(
     target: Target,
     token: Option<String>,
 ) -> CmdResult<()> {
-    let job = downloads::job(&target, state.settings().llm.base_url, token);
+    let settings = state.settings();
+    // Under a MB, and part of transcribing well: it comes along with the model.
+    if let (Kind::Whisper, Some(vad), Some(path)) = (target.kind, &settings.vad_model, settings.vad_model_path())
+        && !path.is_file()
+    {
+        let vad = Target { kind: Kind::Vad, name: vad.clone() };
+        let job = downloads::job(&vad, settings.llm.base_url.clone(), None);
+        state.downloads.start(&app, vad, job);
+    }
+    let job = downloads::job(&target, settings.llm.base_url, token);
     state.downloads.start(&app, target, job);
     Ok(())
 }

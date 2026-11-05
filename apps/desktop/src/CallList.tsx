@@ -1,7 +1,7 @@
 import type { PointerEvent } from "react";
 import type { Call, CallId, Folder } from "./api";
 import { folderColor, FolderMark } from "./Folders";
-import { formatDate, formatDuration, stepLabel } from "./format";
+import { formatDate, formatDay, formatDuration, stepLabel } from "./format";
 
 export type ProgressMap = Record<CallId, { step: string; fraction: number }>;
 
@@ -36,6 +36,8 @@ interface Props {
   folders: Folder[];
   /** Show each call's folder (when listing several folders at once). */
   showFolder: boolean;
+  /** One line per call instead of two. */
+  compact: boolean;
   /** The call being dragged, dimmed in the list. */
   dragging?: CallId;
   emptyText: string;
@@ -75,6 +77,7 @@ function CallItem({
   progress,
   folders,
   showFolder,
+  compact,
   dragging,
   onSelect,
   onDragStart,
@@ -96,13 +99,13 @@ function CallItem({
         <span className="call-title">{call.title}</span>
         <span className="call-meta">
           <span className="call-when">
-            {formatDate(call.created_at)}
-            {duration && ` · ${duration}`}
+            {compact ? formatDay(call.created_at) : formatDate(call.created_at)}
+            {!compact && duration && ` · ${duration}`}
           </span>
           {showFolder && call.folder && (
             <span className="call-folder" title={call.folder}>
               <FolderMark color={folderColor(folders, call.folder)} />
-              <span className="call-folder-name">{call.folder}</span>
+              {!compact && <span className="call-folder-name">{call.folder}</span>}
             </span>
           )}
         </span>

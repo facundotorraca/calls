@@ -733,6 +733,50 @@ code {
   height: 12px;
 }
 
+/* ── Compact list: a line per call, what is unusual about one in place of its date. */
+
+.sidebar.compact .nav-item {
+  height: 24px;
+}
+
+.sidebar.compact .group-label {
+  padding-top: 8px;
+  padding-bottom: 2px;
+}
+
+.sidebar.compact .call-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding-block: 3px;
+}
+
+.sidebar.compact .call-meta {
+  flex-direction: row-reverse;
+}
+
+/* Wide enough for `30 oct`, so the folder marks line up down the list. */
+.sidebar.compact .call-when {
+  min-width: 6ch;
+  text-align: right;
+}
+
+.sidebar.compact .call-item:has(.badge) .call-meta {
+  display: none;
+}
+
+.sidebar.compact .badge {
+  align-self: center;
+  margin-top: 0;
+  letter-spacing: 0.04em;
+}
+
+.sidebar.compact .mini-progress {
+  grid-column: 1 / -1;
+  margin-block: 2px;
+}
+
 .badge {
   display: inline-flex;
   align-self: flex-start;

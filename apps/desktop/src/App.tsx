@@ -53,6 +53,7 @@ export function App() {
   const [island, setIsland] = useState<Island>({ kind: "hidden" });
   const [scope, setScope] = usePersistentState<Scope>("sidebar.scope", { kind: "all" });
   const [sort, setSort] = usePersistentState<Sort>("sidebar.sort", "newest");
+  const [compact, setCompact] = usePersistentState("sidebar.compact", false);
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<CallId | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -258,14 +259,16 @@ export function App() {
   };
 
 
-  const sortMenu = () =>
-    popupMenu(
-      (Object.keys(SORT_LABELS) as Sort[]).map((key) => ({
+  const listMenu = () =>
+    popupMenu([
+      ...(Object.keys(SORT_LABELS) as Sort[]).map((key) => ({
         text: SORT_LABELS[key],
         checked: key === sort,
         action: () => setSort(key),
       })),
-    );
+      "separator",
+      { text: "Vista compacta", checked: compact, action: () => setCompact(!compact) },
+    ]);
 
   const current = calls.find((c) => c.id === selected) ?? null;
 
@@ -295,7 +298,7 @@ export function App() {
 
   return (
     <div className={`app ${drag ? "dragging-call" : ""}`}>
-      <aside className="sidebar">
+      <aside className={`sidebar ${compact ? "compact" : ""}`}>
         <header className="sidebar-header">
           <h1 className="wordmark">calls</h1>
           <div className="actions">
@@ -328,7 +331,7 @@ export function App() {
               }}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             />
-            <button className="search-action" onClick={sortMenu} title={`Ordenar: ${SORT_LABELS[sort]}`}>
+            <button className="search-action" onClick={listMenu} title={`Orden: ${SORT_LABELS[sort]}`}>
               <SortIcon />
             </button>
           </label>
@@ -353,6 +356,7 @@ export function App() {
             progress={progress}
             folders={folders}
             showFolder={searching || scope.kind === "all"}
+            compact={compact}
             dragging={drag?.call.id}
             emptyText={
               searching

@@ -98,6 +98,7 @@ fn main() {
             commands::search,
             commands::import_files,
             commands::process_call,
+            commands::reprocess_call,
             commands::rename_call,
             commands::move_call,
             commands::trash_call,

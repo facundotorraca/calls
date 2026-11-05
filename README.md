@@ -103,15 +103,33 @@ macOS asks again after every update.
 Each call goes through a list of steps (`crates/core/src/steps.rs`):
 
 ```
-extract_audio -> transcribe -> render_markdown -> summarize
+extract_audio -> playback -> transcribe -> diarize -> render_markdown -> name_speakers -> summarize
 ```
 
-`summarize` asks the local LLM for a summary, decisions and action items (`summary.json`,
-`summary.md`), written in `summary_language`. It runs last, so the transcript is usable even
-if Ollama is closed; "Generar resumen" in the app runs it later.
+The app draws them as five stages, on every call and in Settings > Pipeline:
+
+```
+audio -> silencios -> transcribir -> voces -> resumen
+```
+
+Only `audio` and `transcribir` are a must. Silences are skipped by whisper as it transcribes, so
+they are not a step of their own.
+
+A step can be missing from a call in three ways, none of them an error:
+
+- **Off, or its engine is not there** (no model, Ollama closed): `default_pipeline` leaves it
+  out, and `Doctor` says what is missing.
+- **Postponed** (no memory for the model right after a call): it runs when asked.
+- **Not ready** (`Step::ready`): what it works on is not there yet, like a transcript without a
+  transcription model. It runs once it is.
+
+If an `optional` step fails, the call is still ready and the error stays on the step
+(`step_errors` in `call.json`). Only a required step failing fails the call.
 
 Completed steps are recorded in `call.json`, so processing is resumable (the app resumes
-pending calls on start) and new steps run over old calls automatically.
+pending calls on start) and new steps run over old calls automatically. Reprocessing
+(`Pipeline::reset_from`) forgets a step and the ones after it, so they run again with the settings
+as they are now; what they wrote stays until they replace it.
 
 To add a feature (summary, action items, export to Notion...):
 
@@ -165,8 +183,7 @@ The original recording is referenced, never copied or moved. Settings and models
 - Search across calls (titles, transcripts and summaries).
 - Import: skip duplicates by content (the same file under another name or path), import
   whole folders, and keep going past a file that fails.
-- Re-transcribe and re-summarize existing calls (e.g. after changing the model or the
-  vocabulary); refresh the summary after renaming speakers.
+- Refresh the summary after renaming speakers.
 - Word level timestamps.
 - Embedded LLM: llama.cpp built from source like whisper.cpp, so the app does not need
   Ollama installed (matters to distribute it; Ollama runs llama.cpp itself).

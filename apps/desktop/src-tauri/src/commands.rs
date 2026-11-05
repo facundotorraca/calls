@@ -16,7 +16,7 @@ use calls_core::{Call, CallId, Folder, FolderColor, Settings, Status, Transcript
 use calls_engines::models::{self, LocalModel, ModelKind};
 use calls_engines::notion::Notion;
 use calls_engines::ollama::{self, InstalledModel};
-use calls_engines::{Doctor, Ffmpeg, pyannote};
+use calls_engines::{Doctor, Ffmpeg, default_pipeline, pyannote};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -208,6 +208,17 @@ pub async fn import_files(state: State<'_, AppState>, paths: Vec<PathBuf>) -> Cm
 #[tauri::command]
 pub async fn process_call(state: State<'_, AppState>, id: CallId) -> CmdResult<()> {
     state.library.update(&id, |call| call.status = Status::Pending).map_err(to_string)?;
+    state.queue.push_on_demand(id);
+    Ok(())
+}
+
+/// Does `from` and the steps after it again, with the settings as they are now.
+#[tauri::command]
+pub async fn reprocess_call(state: State<'_, AppState>, id: CallId, from: String) -> CmdResult<()> {
+    let (library, settings) = (state.library.clone(), state.settings());
+    let call_id = id.clone();
+    // Putting the pipeline together asks Ollama what it has.
+    blocking(move || default_pipeline(&settings)?.reset_from(&library, &call_id, &from)).await?;
     state.queue.push_on_demand(id);
     Ok(())
 }

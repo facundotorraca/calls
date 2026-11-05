@@ -245,7 +245,10 @@ export const api = {
   /** Calls with every word somewhere in them, title matches first. */
   search: (query: string) => invoke<SearchResult[]>("search", { query }),
   importFiles: (paths: string[]) => invoke<Call[]>("import_files", { paths }),
+  /** Runs whatever is missing for the call. */
   processCall: (id: CallId) => invoke<void>("process_call", { id }),
+  /** Does `from` and the steps after it again, with the settings as they are now. */
+  reprocessCall: (id: CallId, from: string) => invoke<void>("reprocess_call", { id, from }),
   renameCall: (id: CallId, title: string) => invoke<Call>("rename_call", { id, title }),
   /** `null` takes the call out of any folder; a new name creates the folder. */
   moveCall: (id: CallId, folder: string | null) => invoke<Call>("move_call", { id, folder }),

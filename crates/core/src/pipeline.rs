@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::Local;
 use serde::Serialize;
 
@@ -160,6 +160,25 @@ impl Pipeline {
         call.status = Status::Ready;
         library.save_progress(&mut call)?;
         emit(Event::Finished { call_id: id.clone() });
+        Ok(())
+    }
+
+    /// Forgets `from` and every step after it, for the next run to do them again. What they
+    /// wrote stays until they replace it, and steps turned off keep their results.
+    pub fn reset_from(&self, library: &Library, id: &CallId, from: &str) -> Result<()> {
+        let Some(start) = self.steps.iter().position(|s| s.id() == from) else {
+            bail!("{from} is not in the pipeline");
+        };
+        if matches!(library.load(id)?.status, Status::Recording | Status::Pending | Status::Processing { .. }) {
+            bail!("the call is busy: wait for it to finish");
+        }
+        library.update(id, |call| {
+            for step in &self.steps[start..] {
+                call.completed_steps.remove(step.id());
+                call.step_errors.remove(step.id());
+            }
+            call.status = Status::Pending;
+        })?;
         Ok(())
     }
 }
@@ -334,6 +353,38 @@ mod tests {
 
         Pipeline::new().with(Heavy).with(After("heavy")).run(&library, &call.id, true, &|_| {}).unwrap();
         assert!(library.load(&call.id).unwrap().completed_steps.contains_key("after"));
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn resetting_runs_a_step_and_the_ones_after_it_again() {
+        let tmp = std::env::temp_dir().join(format!("calls-pipeline-reset-{}", std::process::id()));
+        let library = Library::open(tmp.join("lib")).unwrap();
+        fs::write(tmp.join("call.mkv"), b"x").unwrap();
+        let call = library.import(&tmp.join("call.mkv")).unwrap();
+        let pipeline = Pipeline::new().with(Heavy).with(Flaky { runs: AtomicUsize::new(0), fail_first: false });
+        pipeline.run(&library, &call.id, true, &|_| {}).unwrap();
+
+        // A step that is off keeps its result, whatever came before it.
+        library
+            .update(&call.id, |c| {
+                c.completed_steps.insert("off".into(), Local::now());
+            })
+            .unwrap();
+        pipeline.reset_from(&library, &call.id, "flaky").unwrap();
+        let reset = library.load(&call.id).unwrap();
+        assert_eq!(reset.status, Status::Pending);
+        assert!(reset.completed_steps.contains_key("heavy"));
+        assert!(reset.completed_steps.contains_key("off"));
+        assert!(!reset.completed_steps.contains_key("flaky"));
+
+        // Not while it is at it, and only steps that are on.
+        assert!(pipeline.reset_from(&library, &call.id, "flaky").is_err());
+        library.update(&call.id, |c| c.status = Status::Ready).unwrap();
+        assert!(pipeline.reset_from(&library, &call.id, "off").is_err());
+
+        pipeline.reset_from(&library, &call.id, "heavy").unwrap();
+        assert!(!library.load(&call.id).unwrap().completed_steps.contains_key("heavy"));
         fs::remove_dir_all(tmp).unwrap();
     }
 }

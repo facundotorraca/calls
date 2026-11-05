@@ -19,6 +19,13 @@ enum Command {
     Import { files: Vec<PathBuf> },
     /// Resume or retry processing a call
     Process { id: String },
+    /// Do a step of a call and the ones after it again
+    Reprocess {
+        id: String,
+        /// The step to start from
+        #[arg(long, default_value = "transcribe")]
+        from: String,
+    },
     /// List calls in the library
     List,
     /// Print a call's transcript
@@ -43,6 +50,11 @@ fn main() -> Result<()> {
             }
         }
         Command::Process { id } => process(&library, &settings, &CallId(id))?,
+        Command::Reprocess { id, from } => {
+            let id = CallId(id);
+            default_pipeline(&settings)?.reset_from(&library, &id, &from)?;
+            process(&library, &settings, &id)?;
+        }
         Command::List => {
             for call in library.list()? {
                 let status = match &call.status {
